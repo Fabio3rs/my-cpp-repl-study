@@ -1,3 +1,6 @@
 [submodule "simdjson"]
 	path = simdjson
 	url = https://github.com/simdjson/simdjson.git
+[submodule "editor"]
+	path = editor
+	url = https://github.com/Fabio3rs/editor

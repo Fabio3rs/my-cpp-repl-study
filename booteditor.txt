@@ -1,0 +1,8 @@
+#lib ncurses
+#include "line.h"
+#eval line.cpp
+#eval page.cpp
+#eval prompt.cpp
+#eval text.cpp
+#eval bootstrapProgram = textmain
+
