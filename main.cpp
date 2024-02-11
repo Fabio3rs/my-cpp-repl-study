@@ -47,28 +47,56 @@
     dlclose(handle);
 }*/
 
+std::unordered_set<std::string> linkLibraries;
+
+auto getLinkLibraries() -> std::unordered_set<std::string> {
+    std::unordered_set<std::string> linkLibraries;
+
+    std::fstream file("linkLibraries.txt", std::ios::in);
+
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            linkLibraries.insert(line);
+        }
+    }
+
+    return linkLibraries;
+}
+
+auto getLinkLibrariesStr() -> std::string {
+    std::string linkLibrariesStr;
+
+    for (const auto &lib : linkLibraries) {
+        linkLibrariesStr += " -l" + lib;
+    }
+
+    return linkLibrariesStr;
+}
+
 void onlybuild(const std::string &name) {
     auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
                "-Wl,--export-dynamic -fPIC " +
-               name +
-               ".cpp -o "
+               name + ".cpp " + getLinkLibrariesStr() +
+               " -o "
                "lib" +
                name + ".so";
+
     system(cmd.c_str());
 }
 
 void build(const std::string &name) {
     auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
                "-Wl,--export-dynamic -fPIC " +
-               name +
-               ".cpp -o "
+               name + ".cpp " + getLinkLibrariesStr() +
+               " -o "
                "lib" +
                name + ".so > " + name + ".json";
     system(cmd.c_str());
     cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
           "precompiledheader.hpp -fsyntax-only " +
-          name +
-          ".cpp -o "
+          name + ".cpp " + getLinkLibrariesStr() +
+          " -o "
           "lib" +
           name + ".so > " + name + ".json";
     system(cmd.c_str());
@@ -241,6 +269,17 @@ int analyzeast(const std::string &filename, const std::string &source,
 
                 /*std::cout << "qualType: " << qualType_string.value()
                           << std::endl;*/
+
+                auto storageClassJs = element["storageClass"];
+
+                std::string storageClass(
+                    storageClassJs.error()
+                        ? ""
+                        : storageClassJs.get_string().value());
+
+                if (storageClass == "extern" || storageClass == "static") {
+                    continue;
+                }
 
                 if (kind_string.value() == "FunctionDecl") {
                     auto qualTypestr = std::string(qualType_string.value());
@@ -455,7 +494,8 @@ void printAllSave(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ", \"" << var.name << "\");\n";
+            printerOutput << "printdata(" << var.name << ", \"" << var.name
+                          << "\");\n";
         }
     }
 
@@ -478,8 +518,8 @@ std::vector<VarDecl> todasVars;
 auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
     auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
-               name +
-               ".cpp -o "
+               name + ".cpp " + getLinkLibrariesStr() +
+               " -o "
                "lib" +
                name + ".so > " + name + ".json";
     int analyzeres = system(cmd.c_str());
@@ -494,8 +534,8 @@ auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
 
     cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
           "-Wl,--export-dynamic -fPIC " +
-          name +
-          ".cpp -o "
+          name + ".cpp " + getLinkLibrariesStr() +
+          " -o "
           "lib" +
           name + ".so > " + name + ".json";
     system(cmd.c_str());
@@ -516,8 +556,8 @@ auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
 auto build_wnprint(const std::string &name) -> std::vector<VarDecl> {
     auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
-               name +
-               ".cpp -o "
+               name + ".cpp " + getLinkLibrariesStr() +
+               " -o "
                "lib" +
                name + ".so > " + name + ".json";
     int analyzeres = system(cmd.c_str());
@@ -532,8 +572,8 @@ auto build_wnprint(const std::string &name) -> std::vector<VarDecl> {
 
     cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
           "-Wl,--export-dynamic -fPIC " +
-          name +
-          ".cpp -o "
+          name + ".cpp " + getLinkLibrariesStr() +
+          " -o "
           "lib" +
           name + ".so";
     system(cmd.c_str());
@@ -584,10 +624,21 @@ void prepareFunctionWrapper(
         }
 
         if (!fnNames.contains(fnvars.name)) {
+            auto qualTypestr = std::string(fnvars.qualType);
+            auto parem = qualTypestr.find_first_of('(');
+
+            if (parem == std::string::npos) {
+                qualTypestr =
+                    "void __attribute__ ((naked)) " + fnvars.name + "()";
+            } else {
+                qualTypestr.insert(
+                    parem,
+                    std::string(" __attribute__ ((naked)) " + fnvars.name));
+            }
+
             wrapper +=
                 "extern \"C\" void *" + fnvars.name + "_ptr = nullptr;\n\n";
-            wrapper +=
-                "void __attribute__ ((naked)) " + fnvars.name + "() {\n";
+            wrapper += qualTypestr + " {\n";
             wrapper += R"(    __asm__ __volatile__ (
         "jmp *%0\n"
         :
@@ -613,7 +664,7 @@ void prepareFunctionWrapper(
 }
 
 void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
-               void *handlewp, void *handle) {
+                     void *handlewp, void *handle) {
     for (const auto &[fns, mangledName] : functions) {
         void *fnptr = dlsym(handle, mangledName.c_str());
         if (!fnptr) {
@@ -710,6 +761,22 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         printAllSave(todasVars);
         runPrintAll();
+        return true;
+    }
+
+    if (line.starts_with("#lib ")) {
+        line = line.substr(5);
+
+        linkLibraries.insert(line);
+
+        /*std::fstream file("linkLibraries.txt", std::ios::out);
+
+        for (const auto &lib : linkLibraries) {
+            file << lib << std::endl;
+        }
+
+        file.close();*/
+
         return true;
     }
 
@@ -859,10 +926,14 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 int __attribute__((visibility("default"))) (*bootstrapProgram)(
     int argc, char **argv) = nullptr;
 
+int64_t replCounter = 0;
+
+auto extExecRepl(std::string_view lineview) -> bool {
+    return execRepl(lineview, replCounter);
+}
+
 void repl() {
     std::string line;
-
-    int64_t i = 0;
 
     writeHeaderPrintOverloads();
     build_precompiledheader();
@@ -873,7 +944,7 @@ void repl() {
             break;
         }
 
-        if (!execRepl(line, i)) {
+        if (!extExecRepl(line)) {
             break;
         }
 
