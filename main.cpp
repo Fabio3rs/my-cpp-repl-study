@@ -95,8 +95,8 @@ void build(const std::string &name) {
     system(cmd.c_str());
     cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
           "precompiledheader.hpp -fsyntax-only " +
-          name + ".cpp " + getLinkLibrariesStr() +
-          " -o "
+          name +
+          ".cpp -o "
           "lib" +
           name + ".so > " + name + ".json";
     system(cmd.c_str());
@@ -623,7 +623,7 @@ void prepareFunctionWrapper(
             continue;
         }
 
-        if (!fnNames.contains(fnvars.name)) {
+        if (!fnNames.contains(fnvars.mangledName)) {
             auto qualTypestr = std::string(fnvars.qualType);
             auto parem = qualTypestr.find_first_of('(');
 
@@ -649,7 +649,7 @@ void prepareFunctionWrapper(
 )";
         }
 
-        functions[fnvars.name] = fnvars.mangledName;
+        functions[fnvars.mangledName] = fnvars.name;
     }
 
     if (!functions.empty()) {
@@ -665,7 +665,7 @@ void prepareFunctionWrapper(
 
 void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
                      void *handlewp, void *handle) {
-    for (const auto &[fns, mangledName] : functions) {
+    for (const auto &[mangledName, fns] : functions) {
         void *fnptr = dlsym(handle, mangledName.c_str());
         if (!fnptr) {
             void **wrap_ptrfn =
@@ -675,18 +675,18 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
                 continue;
             }
 
-            if (!fnNames.contains(fns)) {
+            if (!fnNames.contains(mangledName)) {
                 continue;
             }
 
-            auto &fn = fnNames[fns];
+            auto &fn = fnNames[mangledName];
             fn.fnptr = nullptr;
             fn.wrap_ptrfn = wrap_ptrfn;
             continue;
         }
 
-        if (fnNames.contains(fns)) {
-            auto it = fnNames.find(fns);
+        if (fnNames.contains(mangledName)) {
+            auto it = fnNames.find(mangledName);
             it->second.fnptr = fnptr;
 
             void **wrap_ptrfn = it->second.wrap_ptrfn;
@@ -697,7 +697,7 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
             continue;
         }
 
-        auto &fn = fnNames[fns];
+        auto &fn = fnNames[mangledName];
 
         fn.fnptr = fnptr;
 

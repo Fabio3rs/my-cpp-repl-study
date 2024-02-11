@@ -1,5 +1,9 @@
 #lib ncurses
+#include <ncurses.h>
 #include "line.h"
+#include "page.h"
+#include "prompt.h"
+#include "text.h"
 #eval line.cpp
 #eval page.cpp
 #eval prompt.cpp
