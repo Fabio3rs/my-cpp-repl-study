@@ -79,6 +79,7 @@ std::unordered_set<std::string> includedFiles;
 
 struct VarDecl {
     std::string name;
+    std::string mangledName;
     std::string type;
     std::string qualType;
     std::string kind;
@@ -255,6 +256,24 @@ int analyzeast(const std::string &filename, const std::string &source,
                     std::cout << "extern " << qualTypestr << ";" << std::endl;
 
                     outputHeader += "extern " + qualTypestr + ";\n";
+
+                    auto mangledName = element["mangledName"];
+
+                    if (mangledName.error()) {
+                        continue;
+                    }
+
+                    VarDecl var;
+
+                    var.name = name_string.value();
+                    var.type = "";
+                    var.qualType = qualType_string.value();
+                    var.kind = kind_string.value();
+                    var.file = lastfile;
+                    var.line = lline_int.value();
+                    var.mangledName = mangledName.get_string().value();
+
+                    vars.push_back(std::move(var));
                 } else if (kind_string.value() == "VarDecl") {
                     outputHeader += "#line " +
                                     std::to_string(lline_int.value()) + " \"" +
@@ -436,7 +455,7 @@ void printAllSave(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ");\n";
+            printerOutput << "printdata(" << var.name << ", \"" << var.name << "\");\n";
         }
     }
 
@@ -447,10 +466,16 @@ void printAllSave(const std::vector<VarDecl> &vars) {
     onlybuild("printerOutput");
 }
 
+struct wrapperFn {
+    void *fnptr;
+    void **wrap_ptrfn;
+};
+
 std::unordered_set<std::string> varsNames;
+std::unordered_map<std::string, wrapperFn> fnNames;
 std::vector<VarDecl> todasVars;
 
-void build_wprint(const std::string &name) {
+auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
     auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
                name +
@@ -460,7 +485,7 @@ void build_wprint(const std::string &name) {
     int analyzeres = system(cmd.c_str());
 
     if (analyzeres != 0) {
-        return;
+        return {};
     }
 
     std::vector<VarDecl> vars;
@@ -484,6 +509,8 @@ void build_wprint(const std::string &name) {
             todasVars.push_back(var);
         }
     }
+
+    return vars;
 }
 
 auto build_wnprint(const std::string &name) -> std::vector<VarDecl> {
@@ -541,6 +568,99 @@ int runPrintAll() {
     dlclose(handlep);
 
     return EXIT_SUCCESS;
+}
+
+void prepareFunctionWrapper(
+    const std::string &name, const std::vector<VarDecl> &vars,
+    std::unordered_map<std::string, std::string> &functions) {
+    std::string wrapper;
+
+    wrapper += "#include \"decl_amalgama.hpp\"\n\n";
+
+    for (const auto &fnvars : vars) {
+        std::cout << fnvars.name << std::endl;
+        if (fnvars.kind != "FunctionDecl") {
+            continue;
+        }
+
+        if (!fnNames.contains(fnvars.name)) {
+            wrapper +=
+                "extern \"C\" void *" + fnvars.name + "_ptr = nullptr;\n\n";
+            wrapper +=
+                "void __attribute__ ((naked)) " + fnvars.name + "() {\n";
+            wrapper += R"(    __asm__ __volatile__ (
+        "jmp *%0\n"
+        :
+        : "r" ()" + fnvars.name +
+                       R"(_ptr)
+    );
+}
+)";
+        }
+
+        functions[fnvars.name] = fnvars.mangledName;
+    }
+
+    if (!functions.empty()) {
+        auto wrappername = "wrapper_" + name;
+        std::fstream wrapperOutput(wrappername + ".cpp",
+                                   std::ios::out | std::ios::trunc);
+        wrapperOutput << wrapper << std::endl;
+        wrapperOutput.close();
+
+        onlybuild(wrappername);
+    }
+}
+
+void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
+               void *handlewp, void *handle) {
+    for (const auto &[fns, mangledName] : functions) {
+        void *fnptr = dlsym(handle, mangledName.c_str());
+        if (!fnptr) {
+            void **wrap_ptrfn =
+                (void **)dlsym(handlewp, (fns + "_ptr").c_str());
+
+            if (!wrap_ptrfn) {
+                continue;
+            }
+
+            if (!fnNames.contains(fns)) {
+                continue;
+            }
+
+            auto &fn = fnNames[fns];
+            fn.fnptr = nullptr;
+            fn.wrap_ptrfn = wrap_ptrfn;
+            continue;
+        }
+
+        if (fnNames.contains(fns)) {
+            auto it = fnNames.find(fns);
+            it->second.fnptr = fnptr;
+
+            void **wrap_ptrfn = it->second.wrap_ptrfn;
+
+            if (wrap_ptrfn) {
+                *wrap_ptrfn = fnptr;
+            }
+            continue;
+        }
+
+        auto &fn = fnNames[fns];
+
+        fn.fnptr = fnptr;
+
+        void **wrap_ptrfn = (void **)dlsym(handlewp, (fns + "_ptr").c_str());
+
+        if (!wrap_ptrfn) {
+            std::cerr << "Cannot load symbol '" << fns << "_ptr': " << dlerror()
+                      << '\n';
+            continue;
+        }
+
+        *wrap_ptrfn = fnptr;
+        fn.wrap_ptrfn = wrap_ptrfn;
+    }
 }
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
@@ -672,6 +792,17 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         onlybuild(name);
     }
 
+    std::unordered_map<std::string, std::string> functions;
+
+    prepareFunctionWrapper(name, vars, functions);
+
+    void *handlewp = nullptr;
+
+    if (!functions.empty()) {
+        handlewp = dlopen(("./libwrapper_" + name + ".so").c_str(),
+                          RTLD_NOW | RTLD_GLOBAL);
+    }
+
     auto load_start = std::chrono::steady_clock::now();
 
     void *handle =
@@ -689,6 +820,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                      .count()
               << "us" << std::endl;
 
+    fillWrapperPtrs(functions, handlewp, handle);
+
     printPrepareAllSave(vars);
 
     void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
@@ -705,6 +838,10 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     }
 
     for (const auto &var : vars) {
+        if (var.kind != "VarDecl") {
+            continue;
+        }
+
         auto it = varPrinterAddresses.find(var.name);
 
         if (it != varPrinterAddresses.end()) {
