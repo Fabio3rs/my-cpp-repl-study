@@ -1,4 +1,5 @@
 #include "simdjson.h"
+#include <bits/getopt_core.h>
 #include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
@@ -74,7 +75,7 @@ auto getLinkLibrariesStr() -> std::string {
     return linkLibrariesStr;
 }
 
-void onlybuild(const std::string &name) {
+int onlybuild(const std::string &name) {
     auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
                "-Wl,--export-dynamic -fPIC " +
                name + ".cpp " + getLinkLibrariesStr() +
@@ -82,24 +83,29 @@ void onlybuild(const std::string &name) {
                "lib" +
                name + ".so";
 
-    system(cmd.c_str());
+    return system(cmd.c_str());
 }
 
-void build(const std::string &name) {
+int build(const std::string &name) {
     auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
                "-Wl,--export-dynamic -fPIC " +
                name + ".cpp " + getLinkLibrariesStr() +
                " -o "
                "lib" +
                name + ".so > " + name + ".json";
-    system(cmd.c_str());
+    int buildres = system(cmd.c_str());
+
+    if (buildres != 0) {
+        return buildres;
+    }
+
     cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
           "precompiledheader.hpp -fsyntax-only " +
           name +
           ".cpp -o "
           "lib" +
           name + ".so > " + name + ".json";
-    system(cmd.c_str());
+    return system(cmd.c_str());
 }
 
 std::string outputHeader;
@@ -636,8 +642,8 @@ void prepareFunctionWrapper(
                     std::string(" __attribute__ ((naked)) " + fnvars.name));
             }
 
-            wrapper +=
-                "extern \"C\" void *" + fnvars.mangledName + "_ptr = nullptr;\n\n";
+            wrapper += "extern \"C\" void *" + fnvars.mangledName +
+                       "_ptr = nullptr;\n\n";
             wrapper += qualTypestr + " {\n";
             wrapper += R"(    __asm__ __volatile__ (
         "jmp *%0\n"
@@ -701,11 +707,12 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
 
         fn.fnptr = fnptr;
 
-        void **wrap_ptrfn = (void **)dlsym(handlewp, (mangledName + "_ptr").c_str());
+        void **wrap_ptrfn =
+            (void **)dlsym(handlewp, (mangledName + "_ptr").c_str());
 
         if (!wrap_ptrfn) {
-            std::cerr << "Cannot load symbol '" << mangledName << "_ptr': " << dlerror()
-                      << '\n';
+            std::cerr << "Cannot load symbol '" << mangledName
+                      << "_ptr': " << dlerror() << '\n';
             continue;
         }
 
@@ -968,7 +975,32 @@ int main(int argc, char **argv) {
         printerOutput.close();
     }
 
-    repl();
+    int c;
+    while ((c = getopt(argc, argv, "r:")) != -1) {
+        switch (c) {
+        case 'r': {
+            std::string_view replCmdsFile(optarg);
+
+            std::fstream file(replCmdsFile.data(), std::ios::in);
+
+            if (!file.is_open()) {
+                std::cerr << "Cannot open file: " << replCmdsFile << '\n';
+                return 1;
+            }
+
+            std::string line;
+            while (std::getline(file, line)) {
+                if (!extExecRepl(line)) {
+                    break;
+                }
+            }
+        } break;
+        }
+    }
+
+    if (!bootstrapProgram) {
+        repl();
+    }
 
     if (bootstrapProgram) {
         return bootstrapProgram(argc, argv);
