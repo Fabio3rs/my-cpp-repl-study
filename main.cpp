@@ -12,42 +12,6 @@
 #include <unordered_set>
 #include <utility>
 
-/*int main() {
-    void *handle = dlopen("./libone.so", RTLD_LAZY | RTLD_GLOBAL);
-    if (!handle) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
-        return 1;
-    }
-
-    void (*printdata)() = (void (*)())dlsym(handle, "_Z9printdatav");
-    if (!printdata) {
-        std::cerr << "Cannot load symbol 'printdata': " << dlerror() << '\n';
-        dlclose(handle);
-        return 1;
-    }
-
-    printdata();
-
-    void *handletwo = dlopen("./libtwo.so", RTLD_LAZY | RTLD_GLOBAL);
-
-    if (!handletwo) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
-        return 1;
-    }
-
-    void (*printdata2)() = (void (*)())dlsym(handletwo, "_Z9printdatav");
-
-    if (!printdata2) {
-        std::cerr << "Cannot load symbol 'printdata': " << dlerror() << '\n';
-        dlclose(handletwo);
-        return 1;
-    }
-
-    printdata2();
-
-    dlclose(handle);
-}*/
-
 std::unordered_set<std::string> linkLibraries;
 
 auto getLinkLibraries() -> std::unordered_set<std::string> {
@@ -1006,61 +970,5 @@ int main(int argc, char **argv) {
         return bootstrapProgram(argc, argv);
     }
 
-    /*std::vector<VarDecl> vars;
-
-    std::string name = "one";
-    build_wprint(name);
-
-    name = "two";
-    build(name);
-    analyzeast(name + ".json", name + ".cpp", vars);
-
-    void *handle = dlopen("./libone.so", RTLD_LAZY | RTLD_GLOBAL);
-    if (!handle) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
-        return 1;
-    }
-
-    void (*printdata)() = (void (*)())dlsym(handle, "_Z9printdatav");
-    if (!printdata) {
-        std::cerr << "Cannot load symbol 'printdata': " << dlerror() << '\n';
-        dlclose(handle);
-        return 1;
-    }
-
-    void *handlep = dlopen("./libprinterOutput.so", RTLD_NOW | RTLD_GLOBAL);
-    if (!handlep) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
-        return 1;
-    }
-
-    void (*printall)() = (void (*)())dlsym(handlep, "_Z8printallv");
-    if (!printall) {
-        std::cerr << "Cannot load symbol 'printall': " << dlerror() << '\n';
-        dlclose(handlep);
-        return 1;
-    }
-
-    printall();
-
-    printdata();
-
-    void *handletwo = dlopen("./libtwo.so", RTLD_LAZY | RTLD_GLOBAL);
-
-    if (!handletwo) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
-        return 1;
-    }
-
-    void (*printdata2)() = (void (*)())dlsym(handletwo, "_Z9printdatav");
-
-    if (!printdata2) {
-        std::cerr << "Cannot load symbol 'printdata': " << dlerror() << '\n';
-        dlclose(handletwo);
-        return 1;
-    }
-
-    printdata2();
-
-    dlclose(handle);*/
+    return 0;
 }
