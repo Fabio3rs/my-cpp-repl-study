@@ -637,12 +637,12 @@ void prepareFunctionWrapper(
             }
 
             wrapper +=
-                "extern \"C\" void *" + fnvars.name + "_ptr = nullptr;\n\n";
+                "extern \"C\" void *" + fnvars.mangledName + "_ptr = nullptr;\n\n";
             wrapper += qualTypestr + " {\n";
             wrapper += R"(    __asm__ __volatile__ (
         "jmp *%0\n"
         :
-        : "r" ()" + fnvars.name +
+        : "r" ()" + fnvars.mangledName +
                        R"(_ptr)
     );
 }
@@ -701,10 +701,10 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
 
         fn.fnptr = fnptr;
 
-        void **wrap_ptrfn = (void **)dlsym(handlewp, (fns + "_ptr").c_str());
+        void **wrap_ptrfn = (void **)dlsym(handlewp, (mangledName + "_ptr").c_str());
 
         if (!wrap_ptrfn) {
-            std::cerr << "Cannot load symbol '" << fns << "_ptr': " << dlerror()
+            std::cerr << "Cannot load symbol '" << mangledName << "_ptr': " << dlerror()
                       << '\n';
             continue;
         }
