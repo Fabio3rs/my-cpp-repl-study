@@ -350,23 +350,26 @@ void printdata(const T &val, std::string_view name) {
 }
 
 void build_precompiledheader() {
-    std::fstream printerOutput("precompiledheader.hpp",
+    std::fstream precompHeader("precompiledheader.hpp",
                                std::ios::out | std::ios::trunc);
 
-    printerOutput << "#pragma once\n\n" << std::endl;
-    printerOutput << "#include <any>\n" << std::endl;
-    printerOutput << "#include \"printerOutput.hpp\"\n\n" << std::endl;
+    precompHeader << "#pragma once\n\n" << std::endl;
+    precompHeader << "#include <any>\n" << std::endl;
+    precompHeader << "extern int (*bootstrapProgram)(int argc, char "
+                     "**argv);\n";
+    precompHeader << "extern std::any lastReplResult;\n";
+    precompHeader << "#include \"printerOutput.hpp\"\n\n" << std::endl;
 
     for (const auto &include : includedFiles) {
         if (std::filesystem::exists(include)) {
-            printerOutput << "#include \"" << include << "\"\n";
+            precompHeader << "#include \"" << include << "\"\n";
         } else {
-            printerOutput << "#include <" << include << ">\n";
+            precompHeader << "#include <" << include << ">\n";
         }
     }
 
-    printerOutput.flush();
-    printerOutput.close();
+    precompHeader.flush();
+    precompHeader.close();
 
     std::string cmd = "clang++ -fPIC -x c++-header -std=c++20 -o "
                       "precompiledheader.hpp.pch precompiledheader.hpp";
@@ -922,9 +925,6 @@ void initRepl() {
     outputHeader.reserve(1024 * 1024);
     outputHeader += "#pragma once\n";
     outputHeader += "#include \"precompiledheader.hpp\"\n";
-    outputHeader += "extern int (*bootstrapProgram)(int argc, char "
-                    "**argv);\n";
-    outputHeader += "std::any lastReplResult;\n";
 
     std::fstream printerOutput("decl_amalgama.hpp",
                                std::ios::out | std::ios::trunc);
