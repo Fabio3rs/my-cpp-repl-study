@@ -1,6 +1,3 @@
-include(CTest)
-enable_testing()
-find_package(GTest)
 
 if (GTest_FOUND)
     message(STATUS "GTest found")
