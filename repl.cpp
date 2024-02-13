@@ -1,6 +1,8 @@
 #include "repl.hpp"
 
+#include "simdjson.h"
 #include "stdafx.hpp"
+#include <cassert>
 
 std::unordered_set<std::string> linkLibraries;
 
@@ -75,6 +77,215 @@ struct VarDecl {
     int line;
 };
 
+void analyzeInner(const std::string &source, std::vector<VarDecl> &vars,
+                  simdjson::simdjson_result<simdjson::ondemand::value> inner) {
+    std::string lastfile;
+
+    if (inner.error() != simdjson::SUCCESS) {
+        std::cout << "inner is not an object" << std::endl;
+        return;
+    }
+
+    // std::cout << "inner is an object" << std::endl;
+    auto inner_type = inner.type();
+    if (inner_type.error() != simdjson::SUCCESS ||
+        inner_type.value() != simdjson::ondemand::json_type::array) {
+        std::cout << "inner is not an array" << std::endl;
+    }
+
+    /*std::cout << "inner is an array " << inner_type.value()
+                  << std::endl;*/
+
+    auto inner_array = inner.get_array();
+
+    for (auto element : inner_array) {
+        auto loc = element["loc"];
+
+        if (loc.error()) {
+            continue;
+        }
+
+        auto lfile = loc["file"];
+
+        if (!lfile.error()) {
+            simdjson::simdjson_result<std::string_view> lfile_string =
+                lfile.get_string();
+
+            if (!lfile_string.error()) {
+                lastfile = lfile_string.value();
+                // std::cout << "file: " << lastfile << std::endl;
+            }
+        }
+
+        auto includedFrom = loc["includedFrom"];
+
+        if (!includedFrom.error()) {
+            auto includedFrom_string = includedFrom["file"].get_string();
+
+            if (!includedFrom_string.error()) {
+                std::filesystem::path p(lastfile);
+
+                p = std::filesystem::absolute(std::filesystem::canonical(p));
+
+                std::string path = p.string();
+
+                /*std::cout << "includedFrom: "
+                          << includedFrom_string.value() << path <<
+                   std::endl;*/
+
+                if (p.filename() != "decl_amalgama.hpp" &&
+                    p.filename() != "printerOutput.hpp" &&
+                    includedFrom_string.value() == source &&
+                    includedFiles.find(path) == includedFiles.end()) {
+                    includedFiles.insert(path);
+                    outputHeader += "#include \"" + path + "\"\n";
+                }
+            }
+        }
+
+        if (!source.empty() && !lastfile.empty() && lastfile != source) {
+            continue;
+        }
+
+        auto lline = loc["line"];
+
+        if (lline.error()) {
+            continue;
+        }
+
+        auto lline_int = lline.get_int64();
+
+        if (lline_int.error()) {
+            continue;
+        }
+
+        // std::cout << "line: " << lline_int.value() << std::endl;
+
+        auto kind = element["kind"];
+
+        if (kind.error()) {
+            continue;
+        }
+
+        auto kind_string = kind.get_string();
+
+        if (kind_string.error()) {
+            continue;
+        }
+
+        // std::cout << "kind: " << kind_string.value() << std::endl;
+
+        auto name = element["name"];
+
+        if (name.error()) {
+            continue;
+        }
+
+        auto name_string = name.get_string();
+
+        if (name_string.error()) {
+            continue;
+        }
+
+        if (kind_string.error() == simdjson::SUCCESS &&
+            kind_string.value() == "CXXRecordDecl" &&
+            element["inner"].error() == simdjson::SUCCESS) {
+            assert(element["inner"].type() ==
+                   simdjson::ondemand::json_type::array);
+            analyzeInner(source, vars, element["inner"]);
+            continue;
+        }
+
+        // std::cout << "name: " << name_string.value() << std::endl;
+
+        auto type = element["type"];
+
+        if (type.error()) {
+            continue;
+        }
+
+        auto qualType = type["qualType"];
+
+        if (qualType.error()) {
+            continue;
+        }
+
+        auto qualType_string = qualType.get_string();
+
+        if (qualType_string.error()) {
+            continue;
+        }
+
+        /*std::cout << "qualType: " << qualType_string.value()
+                  << std::endl;*/
+
+        auto storageClassJs = element["storageClass"];
+
+        std::string storageClass(
+            storageClassJs.error() ? "" : storageClassJs.get_string().value());
+
+        if (storageClass == "extern" || storageClass == "static") {
+            continue;
+        }
+
+        if (kind_string.value() == "FunctionDecl" ||
+            kind_string.value() == "CXXMethodDecl") {
+
+            if (kind_string.value() != "CXXMethodDecl") {
+                auto qualTypestr = std::string(qualType_string.value());
+
+                auto parem = qualTypestr.find_first_of('(');
+
+                if (parem == std::string::npos) {
+                    continue;
+                }
+
+                qualTypestr.insert(parem, std::string(name_string.value()));
+
+                std::cout << "extern " << qualTypestr << ";" << std::endl;
+
+                outputHeader += "extern " + qualTypestr + ";\n";
+            }
+
+            auto mangledName = element["mangledName"];
+
+            if (mangledName.error()) {
+                continue;
+            }
+
+            VarDecl var;
+
+            var.name = name_string.value();
+            var.type = "";
+            var.qualType = qualType_string.value();
+            var.kind = kind_string.value();
+            var.file = lastfile;
+            var.line = lline_int.value();
+            var.mangledName = mangledName.get_string().value();
+
+            vars.push_back(std::move(var));
+        } else if (kind_string.value() == "VarDecl") {
+            outputHeader += "#line " + std::to_string(lline_int.value()) +
+                            " \"" + lastfile + "\"\n";
+            outputHeader += "extern " + std::string(qualType_string.value()) +
+                            " " + std::string(name_string.value()) + ";\n";
+
+            VarDecl var;
+
+            auto type_var = type["desugaredQualType"];
+
+            var.name = name_string.value();
+            var.type = type_var.error() ? "" : type_var.get_string().value();
+            var.qualType = qualType_string.value();
+            var.kind = kind_string.value();
+            var.file = lastfile;
+            var.line = lline_int.value();
+
+            vars.push_back(std::move(var));
+        }
+    }
+}
+
 int analyzeast(const std::string &filename, const std::string &source,
                std::vector<VarDecl> &vars) {
 
@@ -101,214 +312,23 @@ int analyzeast(const std::string &filename, const std::string &source,
         std::cout << error << std::endl;
         return EXIT_FAILURE;
     }
+
+    auto outputHeaderSize = outputHeader.size();
+
     /*std::cout << "if valid, the document has the following type at the root: "
               << type << std::endl;*/
     auto inner = doc["inner"];
 
-    std::string lastfile;
-
-    if (inner.error() == simdjson::SUCCESS) {
-        // std::cout << "inner is an object" << std::endl;
-        auto inner_type = inner.type();
-        if (inner_type.error() == simdjson::SUCCESS) {
-            /*std::cout << "inner is an array " << inner_type.value()
-                      << std::endl;*/
-
-            auto inner_array = inner.get_array();
-
-            for (auto element : inner_array) {
-                auto loc = element["loc"];
-
-                if (loc.error()) {
-                    continue;
-                }
-
-                auto lfile = loc["file"];
-
-                if (!lfile.error()) {
-                    simdjson::simdjson_result<std::string_view> lfile_string =
-                        lfile.get_string();
-
-                    if (!lfile_string.error()) {
-                        lastfile = lfile_string.value();
-                        // std::cout << "file: " << lastfile << std::endl;
-                    }
-                }
-
-                auto includedFrom = loc["includedFrom"];
-
-                if (!includedFrom.error()) {
-                    auto includedFrom_string =
-                        includedFrom["file"].get_string();
-
-                    if (!includedFrom_string.error()) {
-                        std::filesystem::path p(lastfile);
-
-                        p = std::filesystem::absolute(
-                            std::filesystem::canonical(p));
-
-                        std::string path = p.string();
-
-                        /*std::cout << "includedFrom: "
-                                  << includedFrom_string.value() << path <<
-                           std::endl;*/
-
-                        if (p.filename() != "decl_amalgama.hpp" &&
-                            p.filename() != "printerOutput.hpp" &&
-                            includedFrom_string.value() == source &&
-                            includedFiles.find(path) == includedFiles.end()) {
-                            includedFiles.insert(path);
-                            outputHeader += "#include \"" + path + "\"\n";
-                        }
-                    }
-                }
-
-                if (lastfile != source) {
-                    continue;
-                }
-
-                auto lline = loc["line"];
-
-                if (lline.error()) {
-                    continue;
-                }
-
-                auto lline_int = lline.get_int64();
-
-                if (lline_int.error()) {
-                    continue;
-                }
-
-                // std::cout << "line: " << lline_int.value() << std::endl;
-
-                auto kind = element["kind"];
-
-                if (kind.error()) {
-                    continue;
-                }
-
-                auto kind_string = kind.get_string();
-
-                if (kind_string.error()) {
-                    continue;
-                }
-
-                // std::cout << "kind: " << kind_string.value() << std::endl;
-
-                auto name = element["name"];
-
-                if (name.error()) {
-                    continue;
-                }
-
-                auto name_string = name.get_string();
-
-                if (name_string.error()) {
-                    continue;
-                }
-
-                // std::cout << "name: " << name_string.value() << std::endl;
-
-                auto type = element["type"];
-
-                if (type.error()) {
-                    continue;
-                }
-
-                auto qualType = type["qualType"];
-
-                if (qualType.error()) {
-                    continue;
-                }
-
-                auto qualType_string = qualType.get_string();
-
-                if (qualType_string.error()) {
-                    continue;
-                }
-
-                /*std::cout << "qualType: " << qualType_string.value()
-                          << std::endl;*/
-
-                auto storageClassJs = element["storageClass"];
-
-                std::string storageClass(
-                    storageClassJs.error()
-                        ? ""
-                        : storageClassJs.get_string().value());
-
-                if (storageClass == "extern" || storageClass == "static") {
-                    continue;
-                }
-
-                if (kind_string.value() == "FunctionDecl") {
-                    auto qualTypestr = std::string(qualType_string.value());
-
-                    auto parem = qualTypestr.find_first_of('(');
-
-                    if (parem == std::string::npos) {
-                        continue;
-                    }
-
-                    qualTypestr.insert(parem, std::string(name_string.value()));
-
-                    std::cout << "extern " << qualTypestr << ";" << std::endl;
-
-                    outputHeader += "extern " + qualTypestr + ";\n";
-
-                    auto mangledName = element["mangledName"];
-
-                    if (mangledName.error()) {
-                        continue;
-                    }
-
-                    VarDecl var;
-
-                    var.name = name_string.value();
-                    var.type = "";
-                    var.qualType = qualType_string.value();
-                    var.kind = kind_string.value();
-                    var.file = lastfile;
-                    var.line = lline_int.value();
-                    var.mangledName = mangledName.get_string().value();
-
-                    vars.push_back(std::move(var));
-                } else if (kind_string.value() == "VarDecl") {
-                    outputHeader += "#line " +
-                                    std::to_string(lline_int.value()) + " \"" +
-                                    lastfile + "\"\n";
-                    outputHeader += "extern " +
-                                    std::string(qualType_string.value()) + " " +
-                                    std::string(name_string.value()) + ";\n";
-
-                    VarDecl var;
-
-                    auto type_var = type["desugaredQualType"];
-
-                    var.name = name_string.value();
-                    var.type =
-                        type_var.error() ? "" : type_var.get_string().value();
-                    var.qualType = qualType_string.value();
-                    var.kind = kind_string.value();
-                    var.file = lastfile;
-                    var.line = lline_int.value();
-
-                    vars.push_back(std::move(var));
-                }
-            }
-        } else {
-            std::cout << "inner is not an object" << std::endl;
-        }
-    } else {
-        std::cout << "inner is not an object" << std::endl;
-    }
+    analyzeInner(source, vars, inner);
 
     // std::cout << "lastfile: " << lastfile << std::endl;
     // std::cout << outputHeader << std::endl;
 
-    std::fstream headerOutput("decl_amalgama.hpp", std::ios::out);
-    headerOutput << outputHeader << std::endl;
-    headerOutput.close();
+    if (outputHeaderSize != outputHeader.size()) {
+        std::fstream headerOutput("decl_amalgama.hpp", std::ios::out);
+        headerOutput << outputHeader << std::endl;
+        headerOutput.close();
+    }
 
     return EXIT_SUCCESS;
 }
@@ -583,7 +603,7 @@ void prepareFunctionWrapper(
 
     for (const auto &fnvars : vars) {
         std::cout << fnvars.name << std::endl;
-        if (fnvars.kind != "FunctionDecl") {
+        if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl") {
             continue;
         }
 
@@ -592,12 +612,13 @@ void prepareFunctionWrapper(
             auto parem = qualTypestr.find_first_of('(');
 
             if (parem == std::string::npos) {
-                qualTypestr =
-                    "void __attribute__ ((naked)) " + fnvars.name + "()";
+                qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
+                              fnvars.mangledName + "()";
             } else {
-                qualTypestr.insert(
-                    parem,
-                    std::string(" __attribute__ ((naked)) " + fnvars.name));
+                qualTypestr.insert(parem,
+                                   std::string(" __attribute__ ((naked)) " +
+                                               fnvars.mangledName));
+                qualTypestr.insert(0, "extern \"C\" ");
             }
 
             wrapper += "extern \"C\" void *" + fnvars.mangledName +
