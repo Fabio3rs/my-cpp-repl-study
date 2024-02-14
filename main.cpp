@@ -32,8 +32,13 @@ int main(int argc, char **argv) {
         repl();
     }
 
-    if (bootstrapProgram) {
-        return bootstrapProgram(argc, argv);
+    try {
+        if (bootstrapProgram) {
+            return bootstrapProgram(argc, argv);
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "C++ exception: " << e.what() << std::endl;
+        return 1;
     }
 
     return 0;
