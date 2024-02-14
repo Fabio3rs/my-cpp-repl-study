@@ -1,16 +1,25 @@
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string_view>
 #include <sys/inotify.h>
+#include <thread>
 #include <unistd.h>
 
 auto extExecRepl(std::string_view lineview) -> bool;
 
-constexpr size_t INOTIFY_EVENT_SIZE = (sizeof(struct inotify_event));
-constexpr size_t MAX_BUF_LEN = (1024 * (INOTIFY_EVENT_SIZE + 16));
+static constexpr size_t INOTIFY_EVENT_SIZE = (sizeof(struct inotify_event));
+static constexpr size_t MAX_BUF_LEN = (1024 * (INOTIFY_EVENT_SIZE + 16));
+
+static std::string_view trimStrview(std::string_view str) {
+    str = str.substr(str.find_first_not_of(" \t\n\v\f\r\0"));
+    str = str.substr(0, str.find_last_not_of(" \t\n\v\f\r\0") + 1);
+
+    return str;
+}
 
 void rebuildUpdatedFile(std::chrono::steady_clock::time_point &last_time,
                         const std::chrono::steady_clock::time_point now,
@@ -20,7 +29,7 @@ void rebuildUpdatedFile(std::chrono::steady_clock::time_point &last_time,
         return;
     }
 
-    if ((now - last_time) < std::chrono::milliseconds(500)) {
+    if ((now - last_time) < std::chrono::seconds(1)) {
         return;
     }
 
@@ -31,7 +40,8 @@ void rebuildUpdatedFile(std::chrono::steady_clock::time_point &last_time,
     std::cout << "File modified: " << filename << " rebuilt ver" << std::endl;
 
     last_time = now;
-    auto cmd = "#eval " + std::string(filename);
+    auto cmd = "#eval " + filename.string();
+
     extExecRepl(cmd);
 }
 
@@ -45,7 +55,9 @@ void loopBytesInotifyRebuildFiles(
         const auto *event =
             reinterpret_cast<const struct inotify_event *>(&buffer[i]);
 
-        std::string_view filename(event->name, event->len);
+        std::string_view filename(event->name, strnlen(event->name, event->len));
+
+        filename = trimStrview(filename);
 
         std::filesystem::path filename_path;
 
@@ -56,6 +68,8 @@ void loopBytesInotifyRebuildFiles(
         }
 
         std::cout << "Event: " << event->mask << "  " << filename << std::endl;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         try {
             rebuildUpdatedFile(last_time, now, event, filename_path);
@@ -70,6 +84,8 @@ void loopBytesInotifyRebuildFiles(
 int monitorAndRebuildFileOrDirectory(std::string_view file_to_watch) {
     int fd, wd;
     char buffer[MAX_BUF_LEN];
+
+    file_to_watch = trimStrview(file_to_watch);
 
     // Initialize inotify
     fd = inotify_init();

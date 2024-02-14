@@ -1,10 +1,18 @@
-#include "repl.hpp"
-
-#include "simdjson.h"
 #include "stdafx.hpp"
+
+#include "repl.hpp"
+#include "simdjson.h"
+#include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <dlfcn.h>
+#include <filesystem>
+#include <functional>
+#include <string>
 
 std::unordered_set<std::string> linkLibraries;
+std::unordered_set<std::string> includeDirectories;
+std::unordered_set<std::string> preprocessorDefinitions;
 
 auto getLinkLibraries() -> std::unordered_set<std::string> {
     std::unordered_set<std::string> linkLibraries;
@@ -24,6 +32,8 @@ auto getLinkLibraries() -> std::unordered_set<std::string> {
 auto getLinkLibrariesStr() -> std::string {
     std::string linkLibrariesStr;
 
+    linkLibrariesStr += " -L./ ";
+
     for (const auto &lib : linkLibraries) {
         linkLibrariesStr += " -l" + lib;
     }
@@ -31,10 +41,43 @@ auto getLinkLibrariesStr() -> std::string {
     return linkLibrariesStr;
 }
 
-int onlybuild(const std::string &name) {
-    auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
+auto getIncludeDirectoriesStr() -> std::string {
+    std::string includeDirectoriesStr;
+
+    for (const auto &dir : includeDirectories) {
+        includeDirectoriesStr += " -I" + dir;
+    }
+
+    std::cout << "includeDirectoriesStr: " << includeDirectoriesStr
+              << std::endl;
+
+    return includeDirectoriesStr;
+}
+
+auto getPreprocessorDefinitionsStr() -> std::string {
+    std::string preprocessorDefinitionsStr;
+
+    for (const auto &def : preprocessorDefinitions) {
+        preprocessorDefinitionsStr += " -D" + def;
+    }
+
+    return preprocessorDefinitionsStr;
+}
+
+int onlybuild(std::string compiler, const std::string &name,
+              std::string ext = ".cpp", std::string std = "c++20") {
+    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+
+    if (ext == ".c") {
+        includePrecompiledHeader = "";
+    }
+
+    auto cmd = compiler + " -std=" + std + " -shared " +
+               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
+               getPreprocessorDefinitionsStr() +
+               " -g "
                "-Wl,--export-dynamic -fPIC " +
-               name + ".cpp " + getLinkLibrariesStr() +
+               name + ext + " " + getLinkLibrariesStr() +
                " -o "
                "lib" +
                name + ".so";
@@ -42,10 +85,20 @@ int onlybuild(const std::string &name) {
     return system(cmd.c_str());
 }
 
-int build(const std::string &name) {
-    auto cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
+int build(std::string compiler, const std::string &name,
+          std::string ext = ".cpp", std::string std = "c++20") {
+    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+
+    if (ext == ".c") {
+        includePrecompiledHeader = "";
+    }
+
+    auto cmd = compiler + " -std=" + std + " -shared " +
+               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
+               getPreprocessorDefinitionsStr() +
+               " -g "
                "-Wl,--export-dynamic -fPIC " +
-               name + ".cpp " + getLinkLibrariesStr() +
+               name + ext + " " + getLinkLibrariesStr() +
                " -o "
                "lib" +
                name + ".so > " + name + ".json";
@@ -55,10 +108,10 @@ int build(const std::string &name) {
         return buildres;
     }
 
-    cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
-          "precompiledheader.hpp -fsyntax-only " +
-          name +
-          ".cpp -o "
+    cmd = compiler + " -std=" + std + " -fPIC -Xclang -ast-dump=json " +
+          includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
+          getPreprocessorDefinitionsStr() + " -fsyntax-only " + name + ext +
+          " -o "
           "lib" +
           name + ".so > " + name + ".json";
     return system(cmd.c_str());
@@ -267,8 +320,18 @@ void analyzeInner(const std::string &source, std::vector<VarDecl> &vars,
         } else if (kind_string.value() == "VarDecl") {
             outputHeader += "#line " + std::to_string(lline_int.value()) +
                             " \"" + lastfile + "\"\n";
-            outputHeader += "extern " + std::string(qualType_string.value()) +
-                            " " + std::string(name_string.value()) + ";\n";
+
+            std::string typenamestr = std::string(qualType_string.value());
+
+            if (auto bracket = typenamestr.find_first_of('[');
+                bracket != std::string::npos) {
+                typenamestr.insert(bracket,
+                                   " " + std::string(name_string.value()));
+            } else {
+                typenamestr += " " + std::string(name_string.value());
+            }
+
+            outputHeader += "extern " + typenamestr + ";\n";
 
             VarDecl var;
 
@@ -338,10 +401,12 @@ void writeHeaderPrintOverloads() {
 #pragma once
 #include <iostream>
 #include <vector>
+#include <deque>
+#include <mutex>
 #include <string_view>
 
 template <class T>
-void printdata(const std::vector<T> &vect, std::string_view name) {
+inline void printdata(const std::vector<T> &vect, std::string_view name) {
     std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
     for (const auto &v : vect) {
         std::cout << v << ' ';
@@ -350,12 +415,26 @@ void printdata(const std::vector<T> &vect, std::string_view name) {
     std::cout << std::endl;
 }
 
-void printdata(std::string_view str, std::string_view name) {
+template <class T>
+inline void printdata(const std::deque<T> &vect, std::string_view name) {
+    std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
+    for (const auto &v : vect) {
+        std::cout << v << ' ';
+    }
+
+    std::cout << std::endl;
+}
+
+inline void printdata(std::string_view str, std::string_view name) {
     std::cout << " >> " << (name.empty()? "" : " ") << (name.empty()? "" : name) << str << std::endl;
 }
 
+inline void printdata(const std::mutex &mtx, std::string_view name) {
+    std::cout << " >> " << (name.empty()? "" : " ") << (name.empty()? "" : name) << "Mutex" << std::endl;
+}
+
 template <class T>
-void printdata(const T &val, std::string_view name) {
+inline void printdata(const T &val, std::string_view name) {
     std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << val << std::endl;
 }
 
@@ -369,7 +448,7 @@ void printdata(const T &val, std::string_view name) {
     printerOutput.close();
 }
 
-void build_precompiledheader() {
+int build_precompiledheader(std::string compiler = "clang++") {
     std::fstream precompHeader("precompiledheader.hpp",
                                std::ios::out | std::ios::trunc);
 
@@ -391,9 +470,11 @@ void build_precompiledheader() {
     precompHeader.flush();
     precompHeader.close();
 
-    std::string cmd = "clang++ -fPIC -x c++-header -std=c++20 -o "
+    std::string cmd = compiler + getPreprocessorDefinitionsStr() + " " +
+                      getIncludeDirectoriesStr() +
+                      " -fPIC -x c++-header -std=c++20 -o "
                       "precompiledheader.hpp.pch precompiledheader.hpp";
-    system(cmd.c_str());
+    return system(cmd.c_str());
 }
 
 std::unordered_map<std::string, void (*)()> varPrinterAddresses;
@@ -436,7 +517,7 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    onlybuild(name);
+    onlybuild("clang++", name);
 
     void *handlep =
         dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
@@ -487,7 +568,7 @@ void printAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    onlybuild("printerOutput");
+    onlybuild("clang++", "printerOutput");
 }
 
 struct wrapperFn {
@@ -499,13 +580,18 @@ std::unordered_set<std::string> varsNames;
 std::unordered_map<std::string, wrapperFn> fnNames;
 std::vector<VarDecl> todasVars;
 
-auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
-    auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
+auto build_wprint(std::string compiler, const std::string &name)
+    -> std::vector<VarDecl> {
+    auto cmd = compiler + getPreprocessorDefinitionsStr() + " " +
+               getIncludeDirectoriesStr() +
+               " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
                name + ".cpp " + getLinkLibrariesStr() +
                " -o "
                "lib" +
                name + ".so > " + name + ".json";
+
+    std::cout << cmd << std::endl;
     int analyzeres = system(cmd.c_str());
 
     if (analyzeres != 0) {
@@ -516,12 +602,15 @@ auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
 
     analyzeast(name + ".json", name + ".cpp", vars);
 
-    cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
+    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
+          getIncludeDirectoriesStr() +
+          " -std=c++20 -shared -include precompiledheader.hpp -g "
           "-Wl,--export-dynamic -fPIC " +
           name + ".cpp " + getLinkLibrariesStr() +
           " -o "
           "lib" +
           name + ".so > " + name + ".json";
+    std::cout << cmd << std::endl;
     system(cmd.c_str());
 
     printAllSave(vars);
@@ -537,29 +626,83 @@ auto build_wprint(const std::string &name) -> std::vector<VarDecl> {
     return vars;
 }
 
-auto build_wnprint(const std::string &name) -> std::vector<VarDecl> {
-    auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
-               "precompiledheader.hpp -fsyntax-only " +
-               name + ".cpp " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so > " + name + ".json";
-    int analyzeres = system(cmd.c_str());
+auto concatNames(const std::vector<std::string> &names) -> std::string {
+    std::string concat;
 
-    if (analyzeres != 0) {
-        return {};
+    size_t size = 0;
+
+    for (const auto &name : names) {
+        size += name.size() + 1;
     }
 
+    concat.reserve(size);
+
+    for (const auto &name : names) {
+        concat += name;
+        concat += " ";
+    }
+
+    return concat;
+}
+
+auto build_wnprint(std::string compiler, const std::string &libname,
+                   const std::vector<std::string> &names)
+    -> std::vector<VarDecl> {
+    auto namesConcated = concatNames(names);
+    std::string cmd;
     std::vector<VarDecl> vars;
 
-    analyzeast(name + ".json", name + ".cpp", vars);
+    for (const auto &name : names) {
+        if (name.empty()) {
+            continue;
+        }
 
-    cmd = "clang++ -std=c++20 -shared -include precompiledheader.hpp -g "
+        auto path = std::filesystem::path(name);
+        std::string purefilename = path.filename().string();
+        std::string wrappedname = "compiler.cpp";
+        {
+            std::fstream replOutput(wrappedname,
+                                    std::ios::out | std::ios::trunc);
+
+            replOutput << "#include \"precompiledheader.hpp\"\n\n";
+            replOutput << "#include \"decl_amalgama.hpp\"\n\n";
+
+            replOutput << "#include \"" << name << "\"" << std::endl;
+
+            replOutput.close();
+        }
+        std::string jsonname = purefilename + ".json";
+        cmd.clear();
+        cmd += compiler + getPreprocessorDefinitionsStr() + " " +
+               getIncludeDirectoriesStr() +
+               " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
+               "precompiledheader.hpp -fsyntax-only " +
+               wrappedname + " " + getLinkLibrariesStr() +
+               " -o "
+               "lib" +
+               libname + ".so > " + jsonname;
+        std::cout << cmd << std::endl;
+        int analyzeres = system(cmd.c_str());
+
+        if (analyzeres != 0) {
+            return {};
+        }
+
+        std::cout << __FILE__ << "    " << name << "     " << name.size()
+                  << std::endl;
+
+        analyzeast(jsonname, name, vars);
+    }
+
+    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
+          getIncludeDirectoriesStr() +
+          " -std=c++20 -shared -include precompiledheader.hpp -g "
           "-Wl,--export-dynamic -fPIC " +
-          name + ".cpp " + getLinkLibrariesStr() +
+          namesConcated + " " + getLinkLibrariesStr() +
           " -o "
           "lib" +
-          name + ".so";
+          libname + ".so";
+    std::cout << cmd << std::endl;
     system(cmd.c_str());
 
     // merge todasVars with vars
@@ -607,11 +750,15 @@ void prepareFunctionWrapper(
             continue;
         }
 
+        if (fnvars.mangledName == "main") {
+            continue;
+        }
+
         if (!fnNames.contains(fnvars.mangledName)) {
             auto qualTypestr = std::string(fnvars.qualType);
             auto parem = qualTypestr.find_first_of('(');
 
-            if (parem == std::string::npos) {
+            if (parem == std::string::npos || fnvars.kind != "FunctionDecl") {
                 qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
                               fnvars.mangledName + "()";
             } else {
@@ -644,7 +791,7 @@ void prepareFunctionWrapper(
         wrapperOutput << wrapper << std::endl;
         wrapperOutput.close();
 
-        onlybuild(wrappername);
+        onlybuild("clang++", wrappername);
     }
 }
 
@@ -701,11 +848,53 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
 }
 
 std::any lastReplResult;
+std::vector<std::function<bool()>> lazyEvalFns;
+bool shouldRecompilePrecompiledHeader = false;
+
+void evalEverything() {
+    for (const auto &fn : lazyEvalFns) {
+        fn();
+    }
+
+    lazyEvalFns.clear();
+}
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     std::string line(lineview);
     if (line == "exit") {
         return false;
+    }
+
+    if (line.starts_with("#includedir ")) {
+        line = line.substr(12);
+
+        includeDirectories.insert(line);
+
+        /*std::fstream file("includeDirectories.txt", std::ios::out);
+
+        for (const auto &dir : includeDirectories) {
+            file << dir << std::endl;
+        }
+
+        file.close();*/
+
+        return true;
+    }
+
+    if (line.starts_with("#compilerdefine ")) {
+        line = line.substr(16);
+
+        preprocessorDefinitions.insert(line);
+
+        /*std::fstream file("preprocessorDefinitions.txt", std::ios::out);
+
+        for (const auto &def : preprocessorDefinitions) {
+            file << def << std::endl;
+        }
+
+        file.close();*/
+
+        return true;
     }
 
     if (line.starts_with("#include")) {
@@ -731,7 +920,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                     includedFiles.find(path) == includedFiles.end()) {
                     includedFiles.insert(path);
 
-                    build_precompiledheader();
+                    shouldRecompilePrecompiledHeader = true;
                 }
             } else {
                 std::cout << "File name not found" << std::endl;
@@ -744,11 +933,21 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
+    if (shouldRecompilePrecompiledHeader) {
+        build_precompiledheader();
+        shouldRecompilePrecompiledHeader = false;
+    }
+
     if (line == "printall") {
         std::cout << "printall" << std::endl;
 
         printAllSave(todasVars);
         runPrintAll();
+        return true;
+    }
+
+    if (line == "evalall") {
+        evalEverything();
         return true;
     }
 
@@ -793,7 +992,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         printerOutput.close();
 
-        onlybuild("printerOutput");
+        onlybuild("clang++", "printerOutput");
 
         runPrintAll();
 
@@ -801,17 +1000,61 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     }
 
     bool analyze = true;
+    bool addIncludes = true;
+    bool fileWrap = true;
 
-    if (line.starts_with("#eval ")) {
-        line = line.substr(6);
+    std::string compiler = "clang++";
+    std::string std = "c++20";
+    std::string extension = "cpp";
+
+    bool lazyEval = line.starts_with("#lazyeval ");
+
+    std::vector<std::string> filesList;
+
+    if (line.starts_with("#batch_eval ")) {
+        line = line.substr(11);
+
+        std::string file;
+        std::istringstream iss(line);
+        while (std::getline(iss, file, ' ')) {
+            filesList.push_back(file);
+        }
+
+        addIncludes = false;
+        fileWrap = false;
+    }
+
+    if (line.starts_with("#eval ") || line.starts_with("#lazyeval ")) {
+        line = line.substr(line.find_first_of(' ') + 1);
+        line = line.substr(0, line.find_last_not_of(" \t\n\v\f\r\0") + 1);
 
         if (std::filesystem::exists(line)) {
-            std::fstream file(line, std::ios::in);
+            fileWrap = false;
+
+            filesList.push_back(line);
+            auto textension = line.substr(line.find_last_of('.') + 1);
+            /*std::fstream file(line, std::ios::in);
+
 
             line.clear();
             std::copy(std::istreambuf_iterator<char>(file),
                       std::istreambuf_iterator<char>(),
-                      std::back_inserter(line));
+                      std::back_inserter(line));*/
+
+            std::cout << "extension: " << textension << std::endl;
+
+            if (textension == "h" || textension == "hpp") {
+                addIncludes = false;
+            }
+
+            if (textension == "c") {
+                extension = textension;
+                analyze = false;
+                addIncludes = false;
+
+                std = "c17";
+                compiler = "clang";
+            }
         } else {
             line = "void exec() { " + line + "; }\n";
             analyze = false;
@@ -826,25 +1069,34 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         analyze = false;
     }
 
-    std::cout << line << std::endl;
+    // std::cout << line << std::endl;
 
     std::string name = "repl_" + std::to_string(i++);
 
-    std::fstream replOutput(name + ".cpp", std::ios::out | std::ios::trunc);
+    if (fileWrap) {
+        std::fstream replOutput(name + "." + extension,
+                                std::ios::out | std::ios::trunc);
 
-    replOutput << "#include \"precompiledheader.hpp\"\n\n";
-    replOutput << "#include \"decl_amalgama.hpp\"\n\n";
+        if (addIncludes) {
+            replOutput << "#include \"precompiledheader.hpp\"\n\n";
+            replOutput << "#include \"decl_amalgama.hpp\"\n\n";
+        }
 
-    replOutput << line << std::endl;
+        replOutput << line << std::endl;
 
-    replOutput.close();
+        replOutput.close();
+    }
 
     std::vector<VarDecl> vars;
 
-    if (analyze) {
-        vars = build_wnprint(name);
+    if (filesList.empty()) {
+        if (analyze) {
+            vars = build_wnprint(compiler, name, {name + ".cpp"});
+        } else {
+            onlybuild(compiler, name, "." + extension, std);
+        }
     } else {
-        onlybuild(name);
+        vars = build_wnprint(compiler, name, filesList);
     }
 
     std::unordered_map<std::string, std::string> functions;
@@ -858,12 +1110,19 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                           RTLD_NOW | RTLD_GLOBAL);
     }
 
+    int dlOpenFlags = RTLD_NOW | RTLD_GLOBAL;
+
+    if (lazyEval) {
+        std::cout << "lazyEval:  " << name << std::endl;
+        dlOpenFlags = RTLD_LAZY | RTLD_GLOBAL;
+    }
+
     auto load_start = std::chrono::steady_clock::now();
 
-    void *handle =
-        dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
+    void *handle = dlopen(("./lib" + name + ".so").c_str(), dlOpenFlags);
     if (!handle) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
+        std::cerr << __FILE__ << ":" << __LINE__
+                  << " Cannot open library: " << dlerror() << '\n';
         return true;
     }
 
@@ -875,39 +1134,58 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                      .count()
               << "us" << std::endl;
 
-    fillWrapperPtrs(functions, handlewp, handle);
+    auto eval = [functions = std::move(functions), handlewp = handlewp,
+                 handle = handle, vars = std::move(vars)]() mutable {
+        fillWrapperPtrs(functions, handlewp, handle);
 
-    printPrepareAllSave(vars);
+        printPrepareAllSave(vars);
 
-    void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
-    if (execv) {
-        auto exec_start = std::chrono::steady_clock::now();
-        execv();
-        auto exec_end = std::chrono::steady_clock::now();
+        void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
+        if (execv) {
+            auto exec_start = std::chrono::steady_clock::now();
+            try {
+                execv();
+            } catch (const std::exception &e) {
+                std::cerr << "C++ exception on exec/eval: " << e.what()
+                          << std::endl;
+            } catch (...) {
+                std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+            }
 
-        std::cout << "exec time: "
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         exec_end - exec_start)
-                         .count()
-                  << "us" << std::endl;
-    }
+            auto exec_end = std::chrono::steady_clock::now();
 
-    for (const auto &var : vars) {
-        if (var.kind != "VarDecl") {
-            continue;
+            std::cout << "exec time: "
+                      << std::chrono::duration_cast<std::chrono::microseconds>(
+                             exec_end - exec_start)
+                             .count()
+                      << "us" << std::endl;
         }
 
-        auto it = varPrinterAddresses.find(var.name);
+        for (const auto &var : vars) {
+            if (var.kind != "VarDecl") {
+                continue;
+            }
 
-        if (it != varPrinterAddresses.end()) {
-            it->second();
-            return true;
-        } else {
-            std::cout << "not found" << std::endl;
+            auto it = varPrinterAddresses.find(var.name);
+
+            if (it != varPrinterAddresses.end()) {
+                it->second();
+            } else {
+                std::cout << "not found: " << var.name << std::endl;
+            }
         }
+
+        std::cout << std::endl;
+
+        return true;
+    };
+
+    if (lazyEval) {
+        lazyEvalFns.push_back(eval);
+    } else {
+        eval();
     }
 
-    std::cout << std::endl;
     return true;
 }
 
