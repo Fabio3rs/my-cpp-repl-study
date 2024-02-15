@@ -6,10 +6,13 @@
 #include <cassert>
 #include <cstddef>
 #include <dlfcn.h>
+#include <execution>
 #include <filesystem>
 #include <functional>
+#include <numeric>
 #include <string>
 #include <system_error>
+#include <utility>
 
 std::unordered_set<std::string> linkLibraries;
 std::unordered_set<std::string> includeDirectories;
@@ -48,9 +51,6 @@ auto getIncludeDirectoriesStr() -> std::string {
     for (const auto &dir : includeDirectories) {
         includeDirectoriesStr += " -I" + dir;
     }
-
-    std::cout << "includeDirectoriesStr: " << includeDirectoriesStr
-              << std::endl;
 
     return includeDirectoriesStr;
 }
@@ -130,6 +130,8 @@ struct VarDecl {
     std::string file;
     int line;
 };
+
+static std::mutex varsWriteMutex;
 
 void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
                   simdjson::simdjson_result<simdjson::ondemand::value> inner) {
@@ -286,6 +288,7 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
 
         if (kind_string.value() == "FunctionDecl" ||
             kind_string.value() == "CXXMethodDecl") {
+            std::scoped_lock<std::mutex> lck(varsWriteMutex);
 
             if (kind_string.value() != "CXXMethodDecl") {
                 auto qualTypestr = std::string(qualType_string.value());
@@ -321,6 +324,7 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
 
             vars.push_back(std::move(var));
         } else if (kind_string.value() == "VarDecl") {
+            std::scoped_lock<std::mutex> lck(varsWriteMutex);
             outputHeader += "#line " + std::to_string(lline_int.value()) +
                             " \"" + lastfile.string() + "\"\n";
 
@@ -352,22 +356,11 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
     }
 }
 
-int analyzeast(const std::string &filename, const std::string &source,
-               std::vector<VarDecl> &vars) {
-
-    simdjson::padded_string json;
-    std::cout << "loading: " << filename << std::endl;
-    auto error = simdjson::padded_string::load(filename).get(json);
-    if (error) {
-        std::cout << "could not load the file " << filename << std::endl;
-        std::cout << "error code: " << error << std::endl;
-        return EXIT_FAILURE;
-    } else {
-        std::cout << "loaded: " << json.size() << " bytes." << std::endl;
-    }
+int analyzeastjs(simdjson::padded_string_view json, const std::string &source,
+                 std::vector<VarDecl> &vars) {
     simdjson::ondemand::parser parser;
     simdjson::ondemand::document doc;
-    error = parser.iterate(json).get(doc);
+    auto error = parser.iterate(json).get(doc);
     if (error) {
         std::cout << error << std::endl;
         return EXIT_FAILURE;
@@ -397,6 +390,71 @@ int analyzeast(const std::string &filename, const std::string &source,
     }
 
     return EXIT_SUCCESS;
+}
+
+int analyzeast(const std::string &filename, const std::string &source,
+               std::vector<VarDecl> &vars) {
+    simdjson::padded_string json;
+    std::cout << "loading: " << filename << std::endl;
+    auto error = simdjson::padded_string::load(filename).get(json);
+    if (error) {
+        std::cout << "could not load the file " << filename << std::endl;
+        std::cout << "error code: " << error << std::endl;
+        return EXIT_FAILURE;
+    } else {
+        std::cout << "loaded: " << json.size() << " bytes." << std::endl;
+    }
+
+    return analyzeastjs(json, source, vars);
+}
+
+auto runProgramGetOutput(std::string_view cmd) {
+    std::pair<std::string, int> result{{}, -1};
+
+    FILE *pipe = popen(cmd.data(), "r");
+
+    if (!pipe) {
+        std::cerr << "popen() failed!" << std::endl;
+        return result;
+    }
+
+    constexpr size_t MBPAGE2 = 1024 * 1024 * 2;
+
+    auto &buffer = result.first;
+    buffer.resize(MBPAGE2);
+
+    size_t finalSize = 0;
+
+    while (!feof(pipe)) {
+        size_t read = fread(buffer.data() + finalSize, 1,
+                            buffer.size() - finalSize, pipe);
+
+        if (read < 0) {
+            std::cerr << "fread() failed!" << std::endl;
+            break;
+        }
+
+        finalSize += read;
+
+        try {
+            if (finalSize == buffer.size()) {
+                buffer.resize(buffer.size() * 2);
+            }
+        } catch (const std::bad_alloc &e) {
+            std::cerr << "bad_alloc caught: " << e.what() << std::endl;
+            break;
+        }
+    }
+
+    result.second = pclose(pipe);
+
+    if (result.second != 0) {
+        std::cerr << "program failed! " << result.second << std::endl;
+    }
+
+    buffer.resize(finalSize);
+
+    return result;
 }
 
 void writeHeaderPrintOverloads() {
@@ -648,54 +706,118 @@ auto concatNames(const std::vector<std::string> &names) -> std::string {
     return concat;
 }
 
+void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
+                                 const std::string &wrappedname) {
+    std::fstream replOutput(wrappedname, std::ios::out | std::ios::trunc);
+
+    replOutput << "#include \"precompiledheader.hpp\"\n\n";
+    replOutput << "#include \"decl_amalgama.hpp\"\n\n";
+
+    replOutput << "#include \"" << name << "\"" << std::endl;
+
+    replOutput.close();
+}
+
 auto build_wnprint(std::string compiler, const std::string &libname,
                    const std::vector<std::string> &names)
     -> std::vector<VarDecl> {
-    auto namesConcated = concatNames(names);
-    std::string cmd;
     std::vector<VarDecl> vars;
 
-    for (const auto &name : names) {
-        if (name.empty()) {
-            continue;
-        }
+    std::string includes = getIncludeDirectoriesStr();
+    std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
 
-        auto path = std::filesystem::path(name);
-        std::string purefilename = path.filename().string();
-        std::string wrappedname = "compiler.cpp";
-        {
-            std::fstream replOutput(wrappedname,
-                                    std::ios::out | std::ios::trunc);
+    std::for_each(
+        std::execution::par, names.begin(), names.end(), [&](const auto &name) {
+            if (name.empty()) {
+                return;
+            }
 
-            replOutput << "#include \"precompiledheader.hpp\"\n\n";
-            replOutput << "#include \"decl_amalgama.hpp\"\n\n";
+            auto path = std::filesystem::path(name);
+            std::string purefilename = path.filename().string();
 
-            replOutput << "#include \"" << name << "\"" << std::endl;
+            purefilename =
+                purefilename.substr(0, purefilename.find_last_of('.'));
 
-            replOutput.close();
-        }
-        std::string jsonname = purefilename + ".json";
-        cmd.clear();
-        cmd += compiler + getPreprocessorDefinitionsStr() + " " +
-               getIncludeDirectoriesStr() +
-               " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
-               "precompiledheader.hpp -fsyntax-only " +
-               wrappedname + " " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               libname + ".so > " + jsonname;
-        std::cout << cmd << std::endl;
-        int analyzeres = system(cmd.c_str());
+            std::string wrappedname = purefilename + "_compiler.cpp";
+            dumpCppIncludeTargetWrapper(name, wrappedname);
 
-        if (analyzeres != 0) {
-            return {};
-        }
+            std::string logname = purefilename + ".log";
+            std::string cmd =
+                compiler + preprocessorDefinitions + " " + includes +
+                " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
+                "precompiledheader.hpp -fsyntax-only " +
+                wrappedname +
+                " "
+                " -o "
+                "lib" +
+                wrappedname + ".so 2>" + logname;
 
-        std::cout << __FILE__ << "    " << name << "     " << name.size()
-                  << std::endl;
+            auto out = runProgramGetOutput(cmd);
 
-        analyzeast(jsonname, name, vars);
-    }
+            if (out.second != 0) {
+                std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
+                          << " " << cmd << std::endl;
+                std::fstream file(logname, std::ios::in);
+
+                std::copy(std::istreambuf_iterator<char>(file),
+                          std::istreambuf_iterator<char>(),
+                          std::ostreambuf_iterator<char>(std::cerr));
+
+                assert(false);
+                return;
+            }
+
+            simdjson::padded_string_view json(out.first);
+            analyzeastjs(json, name, vars);
+        });
+
+    std::string linkLibraries = getLinkLibrariesStr();
+    std::string namesConcated;
+
+    namesConcated.reserve(std::accumulate(
+        names.begin(), names.end(), 0,
+        [](size_t acc, const auto &name) { return acc + name.size() + 1; }));
+
+    std::mutex namesConcatedMutex;
+
+    std::for_each(
+        std::execution::par, names.begin(), names.end(), [&](const auto &name) {
+            if (name.empty()) {
+                return;
+            }
+
+            auto path = std::filesystem::path(name);
+            std::string purefilename = path.filename().string();
+
+            purefilename =
+                purefilename.substr(0, purefilename.find_last_of('.'));
+
+            std::string object = purefilename + ".o";
+
+            {
+                std::scoped_lock<std::mutex> lck(namesConcatedMutex);
+                namesConcated += object + " ";
+            }
+
+            std::string cmd = compiler + preprocessorDefinitions + " " +
+                              includes +
+                              " -std=c++20 -c -include precompiledheader.hpp "
+                              "-g "
+                              "-Wl,--export-dynamic -fPIC " +
+                              purefilename + "_compiler.cpp -o " + object;
+
+            std::cout << cmd << std::endl;
+            int buildres = system(cmd.c_str());
+
+            if (buildres != 0) {
+                std::cerr << "buildres != 0: " << cmd << std::endl;
+                std::cout << name << std::endl;
+                assert(false);
+                return;
+            }
+        });
+
+    std::string cmd;
 
     cmd = compiler + getPreprocessorDefinitionsStr() + " " +
           getIncludeDirectoriesStr() +
