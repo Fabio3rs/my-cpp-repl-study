@@ -130,9 +130,9 @@ struct VarDecl {
     int line;
 };
 
-void analyzeInner(const std::string &source, std::vector<VarDecl> &vars,
+void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
                   simdjson::simdjson_result<simdjson::ondemand::value> inner) {
-    std::string lastfile;
+    std::filesystem::path lastfile;
 
     if (inner.error() != simdjson::SUCCESS) {
         std::cout << "inner is not an object" << std::endl;
@@ -196,7 +196,8 @@ void analyzeInner(const std::string &source, std::vector<VarDecl> &vars,
             }
         }
 
-        if (!source.empty() && !lastfile.empty() && lastfile != source) {
+        if (!source.empty() && !lastfile.empty() &&
+            lastfile.filename() != source.filename()) {
             continue;
         }
 
@@ -319,7 +320,7 @@ void analyzeInner(const std::string &source, std::vector<VarDecl> &vars,
             vars.push_back(std::move(var));
         } else if (kind_string.value() == "VarDecl") {
             outputHeader += "#line " + std::to_string(lline_int.value()) +
-                            " \"" + lastfile + "\"\n";
+                            " \"" + lastfile.string() + "\"\n";
 
             std::string typenamestr = std::string(qualType_string.value());
 
