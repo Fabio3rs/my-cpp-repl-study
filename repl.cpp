@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <system_error>
 
 std::unordered_set<std::string> linkLibraries;
 std::unordered_set<std::string> includeDirectories;
@@ -196,8 +197,9 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
             }
         }
 
+        std::error_code ec;
         if (!source.empty() && !lastfile.empty() &&
-            !std::filesystem::equivalent(lastfile, source)) {
+            !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
             continue;
         }
 
