@@ -197,7 +197,7 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
         }
 
         if (!source.empty() && !lastfile.empty() &&
-            lastfile.filename() != source.filename()) {
+            !std::filesystem::equivalent(lastfile, source)) {
             continue;
         }
 
