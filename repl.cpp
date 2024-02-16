@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <dlfcn.h>
 #include <execution>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include <numeric>
 #include <string>
 #include <system_error>
+#include <unistd.h>
 #include <utility>
 
 std::unordered_set<std::string> linkLibraries;
@@ -66,8 +68,8 @@ auto getPreprocessorDefinitionsStr() -> std::string {
     return preprocessorDefinitionsStr;
 }
 
-int onlybuild(std::string compiler, const std::string &name,
-              std::string ext = ".cpp", std::string std = "c++20") {
+int onlyBuildLib(std::string compiler, const std::string &name,
+                 std::string ext = ".cpp", std::string std = "c++20") {
     std::string includePrecompiledHeader = " -include precompiledheader.hpp";
 
     if (ext == ".c") {
@@ -87,8 +89,8 @@ int onlybuild(std::string compiler, const std::string &name,
     return system(cmd.c_str());
 }
 
-int build(std::string compiler, const std::string &name,
-          std::string ext = ".cpp", std::string std = "c++20") {
+int buildLibAndDumpAST(std::string compiler, const std::string &name,
+                       std::string ext = ".cpp", std::string std = "c++20") {
     std::string includePrecompiledHeader = " -include precompiledheader.hpp";
 
     if (ext == ".c") {
@@ -103,7 +105,7 @@ int build(std::string compiler, const std::string &name,
                name + ext + " " + getLinkLibrariesStr() +
                " -o "
                "lib" +
-               name + ".so > " + name + ".json";
+               name + ".so";
     int buildres = system(cmd.c_str());
 
     if (buildres != 0) {
@@ -134,8 +136,9 @@ struct VarDecl {
 
 static std::mutex varsWriteMutex;
 
-void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
-                  simdjson::simdjson_result<simdjson::ondemand::value> inner) {
+void analyzeInnerAST(
+    std::filesystem::path source, std::vector<VarDecl> &vars,
+    simdjson::simdjson_result<simdjson::ondemand::value> inner) {
     std::filesystem::path lastfile;
 
     if (inner.error() != simdjson::SUCCESS) {
@@ -143,15 +146,11 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
         return;
     }
 
-    // std::cout << "inner is an object" << std::endl;
     auto inner_type = inner.type();
     if (inner_type.error() != simdjson::SUCCESS ||
         inner_type.value() != simdjson::ondemand::json_type::array) {
         std::cout << "inner is not an array" << std::endl;
     }
-
-    /*std::cout << "inner is an array " << inner_type.value()
-                  << std::endl;*/
 
     auto inner_array = inner.get_array();
 
@@ -170,7 +169,6 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
 
             if (!lfile_string.error()) {
                 lastfile = lfile_string.value();
-                // std::cout << "file: " << lastfile << std::endl;
             }
         }
 
@@ -185,10 +183,6 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
                 p = std::filesystem::absolute(std::filesystem::canonical(p));
 
                 std::string path = p.string();
-
-                /*std::cout << "includedFrom: "
-                          << includedFrom_string.value() << path <<
-                   std::endl;*/
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp" &&
@@ -218,8 +212,6 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
             continue;
         }
 
-        // std::cout << "line: " << lline_int.value() << std::endl;
-
         auto kind = element["kind"];
 
         if (kind.error()) {
@@ -231,8 +223,6 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
         if (kind_string.error()) {
             continue;
         }
-
-        // std::cout << "kind: " << kind_string.value() << std::endl;
 
         auto name = element["name"];
 
@@ -251,11 +241,9 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
             element["inner"].error() == simdjson::SUCCESS) {
             assert(element["inner"].type() ==
                    simdjson::ondemand::json_type::array);
-            analyzeInner(source, vars, element["inner"]);
+            analyzeInnerAST(source, vars, element["inner"]);
             continue;
         }
-
-        // std::cout << "name: " << name_string.value() << std::endl;
 
         auto type = element["type"];
 
@@ -274,9 +262,6 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
         if (qualType_string.error()) {
             continue;
         }
-
-        /*std::cout << "qualType: " << qualType_string.value()
-                  << std::endl;*/
 
         auto storageClassJs = element["storageClass"];
 
@@ -357,8 +342,9 @@ void analyzeInner(std::filesystem::path source, std::vector<VarDecl> &vars,
     }
 }
 
-int analyzeastjs(simdjson::padded_string_view json, const std::string &source,
-                 std::vector<VarDecl> &vars) {
+int analyzeASTFromJsonString(simdjson::padded_string_view json,
+                             const std::string &source,
+                             std::vector<VarDecl> &vars) {
     simdjson::ondemand::parser parser;
     simdjson::ondemand::document doc;
     auto error = parser.iterate(json).get(doc);
@@ -375,14 +361,9 @@ int analyzeastjs(simdjson::padded_string_view json, const std::string &source,
 
     auto outputHeaderSize = outputHeader.size();
 
-    /*std::cout << "if valid, the document has the following type at the root: "
-              << type << std::endl;*/
     auto inner = doc["inner"];
 
-    analyzeInner(source, vars, inner);
-
-    // std::cout << "lastfile: " << lastfile << std::endl;
-    // std::cout << outputHeader << std::endl;
+    analyzeInnerAST(source, vars, inner);
 
     if (outputHeaderSize != outputHeader.size()) {
         std::fstream headerOutput("decl_amalgama.hpp", std::ios::out);
@@ -393,8 +374,8 @@ int analyzeastjs(simdjson::padded_string_view json, const std::string &source,
     return EXIT_SUCCESS;
 }
 
-int analyzeast(const std::string &filename, const std::string &source,
-               std::vector<VarDecl> &vars) {
+int analyzeASTFile(const std::string &filename, const std::string &source,
+                   std::vector<VarDecl> &vars) {
     simdjson::padded_string json;
     std::cout << "loading: " << filename << std::endl;
     auto error = simdjson::padded_string::load(filename).get(json);
@@ -406,7 +387,7 @@ int analyzeast(const std::string &filename, const std::string &source,
         std::cout << "loaded: " << json.size() << " bytes." << std::endl;
     }
 
-    return analyzeastjs(json, source, vars);
+    return analyzeASTFromJsonString(json, source, vars);
 }
 
 auto runProgramGetOutput(std::string_view cmd) {
@@ -422,7 +403,13 @@ auto runProgramGetOutput(std::string_view cmd) {
     constexpr size_t MBPAGE2 = 1024 * 1024 * 2;
 
     auto &buffer = result.first;
-    buffer.resize(MBPAGE2);
+    try {
+        buffer.resize(MBPAGE2);
+    } catch (const std::bad_alloc &e) {
+        pclose(pipe);
+        std::cerr << "bad_alloc caught: " << e.what() << std::endl;
+        return result;
+    }
 
     size_t finalSize = 0;
 
@@ -579,7 +566,7 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    onlybuild("clang++", name);
+    onlyBuildLib("clang++", name);
 
     void *handlep =
         dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
@@ -605,7 +592,7 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     }
 }
 
-void printAllSave(const std::vector<VarDecl> &vars) {
+void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars) {
     if (vars.empty()) {
         return;
     }
@@ -630,7 +617,7 @@ void printAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    onlybuild("clang++", "printerOutput");
+    onlyBuildLib("clang++", "printerOutput");
 }
 
 struct wrapperFn {
@@ -640,29 +627,27 @@ struct wrapperFn {
 
 std::unordered_set<std::string> varsNames;
 std::unordered_map<std::string, wrapperFn> fnNames;
-std::vector<VarDecl> todasVars;
+std::vector<VarDecl> allTheVariables;
 
-auto build_wprint(std::string compiler, const std::string &name)
+auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
     -> std::vector<VarDecl> {
     auto cmd = compiler + getPreprocessorDefinitionsStr() + " " +
                getIncludeDirectoriesStr() +
                " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
-               name + ".cpp " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so > " + name + ".json";
+               name + ".cpp -o lib" + name + ".so > " + name + ".json";
 
     std::cout << cmd << std::endl;
     int analyzeres = system(cmd.c_str());
 
     if (analyzeres != 0) {
+        std::cerr << "analyzeres != 0: " << cmd << std::endl;
         return {};
     }
 
     std::vector<VarDecl> vars;
 
-    analyzeast(name + ".json", name + ".cpp", vars);
+    analyzeASTFile(name + ".json", name + ".cpp", vars);
 
     cmd = compiler + getPreprocessorDefinitionsStr() + " " +
           getIncludeDirectoriesStr() +
@@ -671,17 +656,22 @@ auto build_wprint(std::string compiler, const std::string &name)
           name + ".cpp " + getLinkLibrariesStr() +
           " -o "
           "lib" +
-          name + ".so > " + name + ".json";
+          name + ".so";
     std::cout << cmd << std::endl;
-    system(cmd.c_str());
+    int buildres = system(cmd.c_str());
 
-    printAllSave(vars);
+    if (buildres != 0) {
+        std::cerr << "buildres != 0: " << cmd << std::endl;
+        return {};
+    }
+
+    savePrintAllVarsLibrary(vars);
 
     // merge todasVars with vars
     for (const auto &var : vars) {
         if (varsNames.find(var.name) == varsNames.end()) {
             varsNames.insert(var.name);
-            todasVars.push_back(var);
+            allTheVariables.push_back(var);
         }
     }
 
@@ -719,8 +709,9 @@ void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
     replOutput.close();
 }
 
-auto build_wnprint(std::string compiler, const std::string &libname,
-                   const std::vector<std::string> &names)
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names)
     -> std::vector<VarDecl> {
     std::vector<VarDecl> vars;
 
@@ -763,13 +754,11 @@ auto build_wnprint(std::string compiler, const std::string &libname,
                 std::copy(std::istreambuf_iterator<char>(file),
                           std::istreambuf_iterator<char>(),
                           std::ostreambuf_iterator<char>(std::cerr));
-
-                assert(false);
                 return;
             }
 
             simdjson::padded_string_view json(out.first);
-            analyzeastjs(json, name, vars);
+            analyzeASTFromJsonString(json, name, vars);
         });
 
     std::string linkLibraries = getLinkLibrariesStr();
@@ -813,7 +802,6 @@ auto build_wnprint(std::string compiler, const std::string &libname,
             if (buildres != 0) {
                 std::cerr << "buildres != 0: " << cmd << std::endl;
                 std::cout << name << std::endl;
-                assert(false);
                 return;
             }
         });
@@ -829,13 +817,18 @@ auto build_wnprint(std::string compiler, const std::string &libname,
           "lib" +
           libname + ".so";
     std::cout << cmd << std::endl;
-    system(cmd.c_str());
+    int linkRes = system(cmd.c_str());
+
+    if (linkRes != 0) {
+        std::cerr << "linkRes != 0: " << cmd << std::endl;
+        return {};
+    }
 
     // merge todasVars with vars
     for (const auto &var : vars) {
         if (varsNames.find(var.name) == varsNames.end()) {
             varsNames.insert(var.name);
-            todasVars.push_back(var);
+            allTheVariables.push_back(var);
         }
     }
 
@@ -917,7 +910,7 @@ void prepareFunctionWrapper(
         wrapperOutput << wrapper << std::endl;
         wrapperOutput.close();
 
-        onlybuild("clang++", wrappername);
+        onlyBuildLib("clang++", wrappername);
     }
 }
 
@@ -995,15 +988,6 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         line = line.substr(12);
 
         includeDirectories.insert(line);
-
-        /*std::fstream file("includeDirectories.txt", std::ios::out);
-
-        for (const auto &dir : includeDirectories) {
-            file << dir << std::endl;
-        }
-
-        file.close();*/
-
         return true;
     }
 
@@ -1011,15 +995,6 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         line = line.substr(16);
 
         preprocessorDefinitions.insert(line);
-
-        /*std::fstream file("preprocessorDefinitions.txt", std::ios::out);
-
-        for (const auto &def : preprocessorDefinitions) {
-            file << def << std::endl;
-        }
-
-        file.close();*/
-
         return true;
     }
 
@@ -1067,7 +1042,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     if (line == "printall") {
         std::cout << "printall" << std::endl;
 
-        printAllSave(todasVars);
+        savePrintAllVarsLibrary(allTheVariables);
         runPrintAll();
         return true;
     }
@@ -1081,15 +1056,6 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         line = line.substr(5);
 
         linkLibraries.insert(line);
-
-        /*std::fstream file("linkLibraries.txt", std::ios::out);
-
-        for (const auto &lib : linkLibraries) {
-            file << lib << std::endl;
-        }
-
-        file.close();*/
-
         return true;
     }
 
@@ -1118,7 +1084,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         printerOutput.close();
 
-        onlybuild("clang++", "printerOutput");
+        onlyBuildLib("clang++", "printerOutput");
 
         runPrintAll();
 
@@ -1217,12 +1183,13 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
     if (filesList.empty()) {
         if (analyze) {
-            vars = build_wnprint(compiler, name, {name + ".cpp"});
+            vars =
+                buildLibAndDumpASTWithoutPrint(compiler, name, {name + ".cpp"});
         } else {
-            onlybuild(compiler, name, "." + extension, std);
+            onlyBuildLib(compiler, name, "." + extension, std);
         }
     } else {
-        vars = build_wnprint(compiler, name, filesList);
+        vars = buildLibAndDumpASTWithoutPrint(compiler, name, filesList);
     }
 
     std::unordered_map<std::string, std::string> functions;
