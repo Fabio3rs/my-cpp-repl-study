@@ -567,7 +567,12 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    onlyBuildLib("clang++", name);
+    int buildLibRes = onlyBuildLib("clang++", name);
+
+    if (buildLibRes != 0) {
+        std::cerr << "buildLibRes != 0: " << name << std::endl;
+        return;
+    }
 
     void *handlep =
         dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
@@ -1062,7 +1067,7 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
         printPrepareAllSave(vars);
 
         void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
-        if (execv) {
+        if (execv || (execv = (void (*)())dlsym(handle, "exec"))) {
             auto exec_start = std::chrono::steady_clock::now();
             try {
                 execv();
@@ -1149,11 +1154,9 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 std::string path = p.string();
 
                 if (p.filename() != "decl_amalgama.hpp" &&
-                    p.filename() != "printerOutput.hpp" &&
-                    includedFiles.find(path) == includedFiles.end()) {
-                    includedFiles.insert(path);
-
-                    shouldRecompilePrecompiledHeader = true;
+                    p.filename() != "printerOutput.hpp") {
+                    shouldRecompilePrecompiledHeader =
+                        includedFiles.insert(path).second;
                 }
             } else {
                 std::cout << "File name not found" << std::endl;
