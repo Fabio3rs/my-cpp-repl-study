@@ -14,6 +14,7 @@
 #include <numeric>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <unistd.h>
 #include <utility>
 
@@ -712,8 +713,8 @@ void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
 auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                                     const std::string &libname,
                                     const std::vector<std::string> &names)
-    -> std::vector<VarDecl> {
-    std::vector<VarDecl> vars;
+    -> std::pair<std::vector<VarDecl>, int> {
+    std::pair<std::vector<VarDecl>, int> resultc;
 
     std::string includes = getIncludeDirectoriesStr();
     std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
@@ -754,12 +755,17 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                 std::copy(std::istreambuf_iterator<char>(file),
                           std::istreambuf_iterator<char>(),
                           std::ostreambuf_iterator<char>(std::cerr));
+                resultc.second = out.second;
                 return;
             }
 
             simdjson::padded_string_view json(out.first);
-            analyzeASTFromJsonString(json, name, vars);
+            analyzeASTFromJsonString(json, name, resultc.first);
         });
+
+    if (resultc.second != 0) {
+        return resultc;
+    }
 
     std::string linkLibraries = getLinkLibrariesStr();
     std::string namesConcated;
@@ -821,18 +827,18 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
 
     if (linkRes != 0) {
         std::cerr << "linkRes != 0: " << cmd << std::endl;
-        return {};
+        return resultc;
     }
 
     // merge todasVars with vars
-    for (const auto &var : vars) {
+    for (const auto &var : resultc.first) {
         if (varsNames.find(var.name) == varsNames.end()) {
             varsNames.insert(var.name);
             allTheVariables.push_back(var);
         }
     }
 
-    return vars;
+    return resultc;
 }
 
 int runPrintAll() {
@@ -970,12 +976,138 @@ std::any lastReplResult;
 std::vector<std::function<bool()>> lazyEvalFns;
 bool shouldRecompilePrecompiledHeader = false;
 
+struct CompilerCodeCfg {
+    std::string compiler = "clang++";
+    std::string std = "c++20";
+    std::string extension = "cpp";
+    std::string repl_name;
+    std::string libraryName;
+    std::string wrapperName;
+    std::vector<std::string> sourcesList;
+    bool analyze = true;
+    bool addIncludes = true;
+    bool fileWrap = true;
+    bool lazyEval = false;
+};
+
 void evalEverything() {
     for (const auto &fn : lazyEvalFns) {
         fn();
     }
 
     lazyEvalFns.clear();
+}
+
+auto compileAndRunCode(CompilerCodeCfg &&cfg) {
+    std::vector<VarDecl> vars;
+    int returnCode = 0;
+
+    if (cfg.sourcesList.empty()) {
+        if (cfg.analyze) {
+            std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
+                cfg.compiler, cfg.repl_name, {cfg.repl_name + ".cpp"});
+        } else {
+            onlyBuildLib(cfg.compiler, cfg.repl_name, "." + cfg.extension,
+                         cfg.std);
+        }
+    } else {
+        std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
+            cfg.compiler, cfg.repl_name, cfg.sourcesList);
+    }
+
+    if (returnCode != 0) {
+        return false;
+    }
+
+    std::unordered_map<std::string, std::string> functions;
+
+    prepareFunctionWrapper(cfg.repl_name, vars, functions);
+
+    void *handlewp = nullptr;
+
+    if (!functions.empty()) {
+        handlewp = dlopen(("./libwrapper_" + cfg.repl_name + ".so").c_str(),
+                          RTLD_NOW | RTLD_GLOBAL);
+    }
+
+    int dlOpenFlags = RTLD_NOW | RTLD_GLOBAL;
+
+    if (cfg.lazyEval) {
+        std::cout << "lazyEval:  " << cfg.repl_name << std::endl;
+        dlOpenFlags = RTLD_LAZY | RTLD_GLOBAL;
+    }
+
+    auto load_start = std::chrono::steady_clock::now();
+
+    void *handle =
+        dlopen(("./lib" + cfg.repl_name + ".so").c_str(), dlOpenFlags);
+    if (!handle) {
+        std::cerr << __FILE__ << ":" << __LINE__
+                  << " Cannot open library: " << dlerror() << '\n';
+        return false;
+    }
+
+    auto load_end = std::chrono::steady_clock::now();
+
+    std::cout << "load time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(
+                     load_end - load_start)
+                     .count()
+              << "us" << std::endl;
+
+    auto eval = [functions = std::move(functions), handlewp = handlewp,
+                 handle = handle, vars = std::move(vars)]() mutable {
+        fillWrapperPtrs(functions, handlewp, handle);
+
+        printPrepareAllSave(vars);
+
+        void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
+        if (execv) {
+            auto exec_start = std::chrono::steady_clock::now();
+            try {
+                execv();
+            } catch (const std::exception &e) {
+                std::cerr << "C++ exception on exec/eval: " << e.what()
+                          << std::endl;
+            } catch (...) {
+                std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+            }
+
+            auto exec_end = std::chrono::steady_clock::now();
+
+            std::cout << "exec time: "
+                      << std::chrono::duration_cast<std::chrono::microseconds>(
+                             exec_end - exec_start)
+                             .count()
+                      << "us" << std::endl;
+        }
+
+        for (const auto &var : vars) {
+            if (var.kind != "VarDecl") {
+                continue;
+            }
+
+            auto it = varPrinterAddresses.find(var.name);
+
+            if (it != varPrinterAddresses.end()) {
+                it->second();
+            } else {
+                std::cout << "not found: " << var.name << std::endl;
+            }
+        }
+
+        std::cout << std::endl;
+
+        return true;
+    };
+
+    if (cfg.lazyEval) {
+        lazyEvalFns.push_back(eval);
+    } else {
+        eval();
+    }
+
+    return true;
 }
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
@@ -1091,17 +1223,9 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
-    bool analyze = true;
-    bool addIncludes = true;
-    bool fileWrap = true;
+    CompilerCodeCfg cfg;
 
-    std::string compiler = "clang++";
-    std::string std = "c++20";
-    std::string extension = "cpp";
-
-    bool lazyEval = line.starts_with("#lazyeval ");
-
-    std::vector<std::string> filesList;
+    cfg.lazyEval = line.starts_with("#lazyeval ");
 
     if (line.starts_with("#batch_eval ")) {
         line = line.substr(11);
@@ -1109,11 +1233,11 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         std::string file;
         std::istringstream iss(line);
         while (std::getline(iss, file, ' ')) {
-            filesList.push_back(file);
+            cfg.sourcesList.push_back(file);
         }
 
-        addIncludes = false;
-        fileWrap = false;
+        cfg.addIncludes = false;
+        cfg.fileWrap = false;
     }
 
     if (line.starts_with("#eval ") || line.starts_with("#lazyeval ")) {
@@ -1121,9 +1245,9 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         line = line.substr(0, line.find_last_not_of(" \t\n\v\f\r\0") + 1);
 
         if (std::filesystem::exists(line)) {
-            fileWrap = false;
+            cfg.fileWrap = false;
 
-            filesList.push_back(line);
+            cfg.sourcesList.push_back(line);
             auto textension = line.substr(line.find_last_of('.') + 1);
             /*std::fstream file(line, std::ios::in);
 
@@ -1136,20 +1260,20 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
             std::cout << "extension: " << textension << std::endl;
 
             if (textension == "h" || textension == "hpp") {
-                addIncludes = false;
+                cfg.addIncludes = false;
             }
 
             if (textension == "c") {
-                extension = textension;
-                analyze = false;
-                addIncludes = false;
+                cfg.extension = textension;
+                cfg.analyze = false;
+                cfg.addIncludes = false;
 
-                std = "c17";
-                compiler = "clang";
+                cfg.std = "c17";
+                cfg.compiler = "clang";
             }
         } else {
             line = "void exec() { " + line + "; }\n";
-            analyze = false;
+            cfg.analyze = false;
         }
     }
 
@@ -1158,18 +1282,18 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         line = "void exec() { printdata(((" + line + ")), \"custom\"); }\n";
 
-        analyze = false;
+        cfg.analyze = false;
     }
 
     // std::cout << line << std::endl;
 
-    std::string name = "repl_" + std::to_string(i++);
+    cfg.repl_name = "repl_" + std::to_string(i++);
 
-    if (fileWrap) {
-        std::fstream replOutput(name + "." + extension,
+    if (cfg.fileWrap) {
+        std::fstream replOutput(cfg.repl_name + "." + cfg.extension,
                                 std::ios::out | std::ios::trunc);
 
-        if (addIncludes) {
+        if (cfg.addIncludes) {
             replOutput << "#include \"precompiledheader.hpp\"\n\n";
             replOutput << "#include \"decl_amalgama.hpp\"\n\n";
         }
@@ -1179,105 +1303,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         replOutput.close();
     }
 
-    std::vector<VarDecl> vars;
-
-    if (filesList.empty()) {
-        if (analyze) {
-            vars =
-                buildLibAndDumpASTWithoutPrint(compiler, name, {name + ".cpp"});
-        } else {
-            onlyBuildLib(compiler, name, "." + extension, std);
-        }
-    } else {
-        vars = buildLibAndDumpASTWithoutPrint(compiler, name, filesList);
-    }
-
-    std::unordered_map<std::string, std::string> functions;
-
-    prepareFunctionWrapper(name, vars, functions);
-
-    void *handlewp = nullptr;
-
-    if (!functions.empty()) {
-        handlewp = dlopen(("./libwrapper_" + name + ".so").c_str(),
-                          RTLD_NOW | RTLD_GLOBAL);
-    }
-
-    int dlOpenFlags = RTLD_NOW | RTLD_GLOBAL;
-
-    if (lazyEval) {
-        std::cout << "lazyEval:  " << name << std::endl;
-        dlOpenFlags = RTLD_LAZY | RTLD_GLOBAL;
-    }
-
-    auto load_start = std::chrono::steady_clock::now();
-
-    void *handle = dlopen(("./lib" + name + ".so").c_str(), dlOpenFlags);
-    if (!handle) {
-        std::cerr << __FILE__ << ":" << __LINE__
-                  << " Cannot open library: " << dlerror() << '\n';
-        return true;
-    }
-
-    auto load_end = std::chrono::steady_clock::now();
-
-    std::cout << "load time: "
-              << std::chrono::duration_cast<std::chrono::microseconds>(
-                     load_end - load_start)
-                     .count()
-              << "us" << std::endl;
-
-    auto eval = [functions = std::move(functions), handlewp = handlewp,
-                 handle = handle, vars = std::move(vars)]() mutable {
-        fillWrapperPtrs(functions, handlewp, handle);
-
-        printPrepareAllSave(vars);
-
-        void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
-        if (execv) {
-            auto exec_start = std::chrono::steady_clock::now();
-            try {
-                execv();
-            } catch (const std::exception &e) {
-                std::cerr << "C++ exception on exec/eval: " << e.what()
-                          << std::endl;
-            } catch (...) {
-                std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
-            }
-
-            auto exec_end = std::chrono::steady_clock::now();
-
-            std::cout << "exec time: "
-                      << std::chrono::duration_cast<std::chrono::microseconds>(
-                             exec_end - exec_start)
-                             .count()
-                      << "us" << std::endl;
-        }
-
-        for (const auto &var : vars) {
-            if (var.kind != "VarDecl") {
-                continue;
-            }
-
-            auto it = varPrinterAddresses.find(var.name);
-
-            if (it != varPrinterAddresses.end()) {
-                it->second();
-            } else {
-                std::cout << "not found: " << var.name << std::endl;
-            }
-        }
-
-        std::cout << std::endl;
-
-        return true;
-    };
-
-    if (lazyEval) {
-        lazyEvalFns.push_back(eval);
-    } else {
-        eval();
-    }
+    compileAndRunCode(std::move(cfg));
 
     return true;
 }
