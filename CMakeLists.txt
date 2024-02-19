@@ -21,4 +21,9 @@ add_executable(cpprepl main.cpp)
 target_precompile_headers(cpprepl PUBLIC stdafx.hpp)
 target_link_libraries(cpprepl cpprepl_lib)
 
+add_executable(libclangtest libclangtest.cpp)
+target_include_directories(libclangtest PRIVATE /usr/lib/llvm-15/include)
+target_link_directories(libclangtest PRIVATE /usr/lib/llvm-15/lib)
+target_link_libraries(libclangtest cpprepl_lib clang)
+
 add_subdirectory(tests)

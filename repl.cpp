@@ -4,6 +4,7 @@
 #include "simdjson.h"
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <dlfcn.h>
@@ -14,6 +15,7 @@
 #include <numeric>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <utility>
@@ -456,8 +458,8 @@ void writeHeaderPrintOverloads() {
 #include <string_view>
 
 template <class T>
-inline void printdata(const std::vector<T> &vect, std::string_view name) {
-    std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
+inline void printdata(const std::vector<T> &vect, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
     for (const auto &v : vect) {
         std::cout << v << ' ';
     }
@@ -466,8 +468,8 @@ inline void printdata(const std::vector<T> &vect, std::string_view name) {
 }
 
 template <class T>
-inline void printdata(const std::deque<T> &vect, std::string_view name) {
-    std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
+inline void printdata(const std::deque<T> &vect, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
     for (const auto &v : vect) {
         std::cout << v << ' ';
     }
@@ -475,17 +477,17 @@ inline void printdata(const std::deque<T> &vect, std::string_view name) {
     std::cout << std::endl;
 }
 
-inline void printdata(std::string_view str, std::string_view name) {
-    std::cout << " >> " << (name.empty()? "" : " ") << (name.empty()? "" : name) << str << std::endl;
+inline void printdata(std::string_view str, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << str << std::endl;
 }
 
-inline void printdata(const std::mutex &mtx, std::string_view name) {
+inline void printdata(const std::mutex &mtx, std::string_view name, std::string_view type) {
     std::cout << " >> " << (name.empty()? "" : " ") << (name.empty()? "" : name) << "Mutex" << std::endl;
 }
 
 template <class T>
-inline void printdata(const T &val, std::string_view name) {
-    std::cout << " >> " << typeid(T).name() << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << val << std::endl;
+inline void printdata(const T &val, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << val << std::endl;
 }
 
     )cpp";
@@ -544,11 +546,13 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
+        /*std::cout << var.qualType << "   " << var.type << "   " << var.name
+                  << std::endl;*/
         if (var.kind == "VarDecl") {
             printerOutput << "extern \"C\" void printvar_" << var.name
                           << "() {\n";
             printerOutput << "  printdata(" << var.name << ", \"" << var.name
-                          << "\");\n";
+                          << "\", \"" + var.qualType + "\");\n";
             printerOutput << "}\n";
         }
     }
@@ -559,7 +563,7 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
             printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\");\n";
+                          << "\", \"" + var.qualType + "\");\n";
         }
     }
 
@@ -615,7 +619,7 @@ void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
             printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\");\n";
+                          << "\", \"" + var.qualType + "\");\n";
         }
     }
 
@@ -715,64 +719,27 @@ void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
     replOutput.close();
 }
 
+void mergeVars(const std::vector<VarDecl> &vars) {
+    for (const auto &var : vars) {
+        if (varsNames.find(var.name) == varsNames.end()) {
+            varsNames.insert(var.name);
+            allTheVariables.push_back(var);
+        }
+    }
+}
+
 auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                                     const std::string &libname,
-                                    const std::vector<std::string> &names)
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
     -> std::pair<std::vector<VarDecl>, int> {
     std::pair<std::vector<VarDecl>, int> resultc;
 
     std::string includes = getIncludeDirectoriesStr();
     std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
 
-    std::for_each(
-        std::execution::par, names.begin(), names.end(), [&](const auto &name) {
-            if (name.empty()) {
-                return;
-            }
+    auto now = std::chrono::system_clock::now();
 
-            auto path = std::filesystem::path(name);
-            std::string purefilename = path.filename().string();
-
-            purefilename =
-                purefilename.substr(0, purefilename.find_last_of('.'));
-
-            std::string wrappedname = purefilename + "_compiler.cpp";
-            dumpCppIncludeTargetWrapper(name, wrappedname);
-
-            std::string logname = purefilename + ".log";
-            std::string cmd =
-                compiler + preprocessorDefinitions + " " + includes +
-                " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
-                "precompiledheader.hpp -fsyntax-only " +
-                wrappedname +
-                " "
-                " -o "
-                "lib" +
-                wrappedname + ".so 2>" + logname;
-
-            auto out = runProgramGetOutput(cmd);
-
-            if (out.second != 0) {
-                std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
-                          << " " << cmd << std::endl;
-                std::fstream file(logname, std::ios::in);
-
-                std::copy(std::istreambuf_iterator<char>(file),
-                          std::istreambuf_iterator<char>(),
-                          std::ostreambuf_iterator<char>(std::cerr));
-                resultc.second = out.second;
-                return;
-            }
-
-            simdjson::padded_string_view json(out.first);
-            analyzeASTFromJsonString(json, name, resultc.first);
-        });
-
-    if (resultc.second != 0) {
-        return resultc;
-    }
-
-    std::string linkLibraries = getLinkLibrariesStr();
     std::string namesConcated;
 
     namesConcated.reserve(std::accumulate(
@@ -787,42 +754,92 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                 return;
             }
 
-            auto path = std::filesystem::path(name);
+            const auto path = std::filesystem::path(name);
             std::string purefilename = path.filename().string();
 
             purefilename =
                 purefilename.substr(0, purefilename.find_last_of('.'));
 
-            std::string object = purefilename + ".o";
+            std::thread analyzeThr([&]() {
+                std::string logname = purefilename + ".log";
+                std::string cmd =
+                    compiler + preprocessorDefinitions + " " + includes +
+                    " -std=" + std +
+                    " -fPIC -Xclang -ast-dump=json "
+                    " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
+                    "-include precompiledheader.hpp -fsyntax-only " +
+                    name + " -o lib" + purefilename + "_blank.so 2>" + logname;
 
-            {
-                std::scoped_lock<std::mutex> lck(namesConcatedMutex);
-                namesConcated += object + " ";
+                auto out = runProgramGetOutput(cmd);
+
+                if (out.second != 0) {
+                    std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
+                              << " " << cmd << std::endl;
+                    std::fstream file(logname, std::ios::in);
+
+                    std::copy(std::istreambuf_iterator<char>(file),
+                              std::istreambuf_iterator<char>(),
+                              std::ostreambuf_iterator<char>(std::cerr));
+                    resultc.second = out.second;
+                    return;
+                }
+
+                simdjson::padded_string_view json(out.first);
+                analyzeASTFromJsonString(json, name, resultc.first);
+            });
+
+            try {
+                std::string object = purefilename + ".o";
+
+                {
+                    std::scoped_lock<std::mutex> lck(namesConcatedMutex);
+                    namesConcated += object + " ";
+                }
+
+                std::string cmd =
+                    compiler + preprocessorDefinitions + " " + includes +
+                    " -std=c++20 -fPIC  -c -Xclang "
+                    "-include-pch -Xclang precompiledheader.hpp.pch "
+                    "-include precompiledheader.hpp "
+                    "-g -fPIC " +
+                    name + " -o " + object;
+
+                int buildres = system(cmd.c_str());
+
+                if (buildres != 0) {
+                    resultc.second = buildres;
+                    std::cerr << "buildres != 0: " << cmd << std::endl;
+                    std::cout << name << std::endl;
+                }
+            } catch (const std::exception &e) {
+                std::cerr << e.what() << std::endl;
+                resultc.second = -1;
             }
 
-            std::string cmd = compiler + preprocessorDefinitions + " " +
-                              includes +
-                              " -std=c++20 -c -include precompiledheader.hpp "
-                              "-g "
-                              "-Wl,--export-dynamic -fPIC " +
-                              purefilename + "_compiler.cpp -o " + object;
-
-            std::cout << cmd << std::endl;
-            int buildres = system(cmd.c_str());
-
-            if (buildres != 0) {
-                std::cerr << "buildres != 0: " << cmd << std::endl;
-                std::cout << name << std::endl;
-                return;
+            if (analyzeThr.joinable()) {
+                analyzeThr.join();
             }
         });
 
+    if (resultc.second != 0) {
+        return resultc;
+    }
+
+    auto end = std::chrono::system_clock::now();
+
+    std::cout << "Analyze and compile time: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       now)
+                     .count()
+              << "ms\n";
+
+    std::string linkLibraries = getLinkLibrariesStr();
+
     std::string cmd;
 
-    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-          getIncludeDirectoriesStr() +
-          " -std=c++20 -shared -include precompiledheader.hpp -g "
-          "-Wl,--export-dynamic -fPIC " +
+    cmd = compiler +
+          " -shared -g "
+          "-WL,--export-dynamic " +
           namesConcated + " " + getLinkLibrariesStr() +
           " -o "
           "lib" +
@@ -835,13 +852,7 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
         return resultc;
     }
 
-    // merge todasVars with vars
-    for (const auto &var : resultc.first) {
-        if (varsNames.find(var.name) == varsNames.end()) {
-            varsNames.insert(var.name);
-            allTheVariables.push_back(var);
-        }
-    }
+    mergeVars(resultc.first);
 
     return resultc;
 }
@@ -1003,27 +1014,8 @@ void evalEverything() {
     lazyEvalFns.clear();
 }
 
-auto compileAndRunCode(CompilerCodeCfg &&cfg) {
-    std::vector<VarDecl> vars;
-    int returnCode = 0;
-
-    if (cfg.sourcesList.empty()) {
-        if (cfg.analyze) {
-            std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
-                cfg.compiler, cfg.repl_name, {cfg.repl_name + ".cpp"});
-        } else {
-            onlyBuildLib(cfg.compiler, cfg.repl_name, "." + cfg.extension,
-                         cfg.std);
-        }
-    } else {
-        std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
-            cfg.compiler, cfg.repl_name, cfg.sourcesList);
-    }
-
-    if (returnCode != 0) {
-        return false;
-    }
-
+auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
+                                 std::vector<VarDecl> &&vars) {
     std::unordered_map<std::string, std::string> functions;
 
     prepareFunctionWrapper(cfg.repl_name, vars, functions);
@@ -1113,6 +1105,40 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
     }
 
     return true;
+}
+
+auto compileAndRunCode(CompilerCodeCfg &&cfg) {
+    std::vector<VarDecl> vars;
+    int returnCode = 0;
+
+    auto now = std::chrono::steady_clock::now();
+
+    if (cfg.sourcesList.empty()) {
+        if (cfg.analyze) {
+            std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
+                cfg.compiler, cfg.repl_name, {cfg.repl_name + ".cpp"}, cfg.std);
+        } else {
+            onlyBuildLib(cfg.compiler, cfg.repl_name, "." + cfg.extension,
+                         cfg.std);
+        }
+    } else {
+        std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
+            cfg.compiler, cfg.repl_name, cfg.sourcesList, cfg.std);
+    }
+
+    if (returnCode != 0) {
+        return false;
+    }
+
+    auto end = std::chrono::steady_clock::now();
+
+    std::cout << "build time: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       now)
+                     .count()
+              << "ms" << std::endl;
+
+    return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
 }
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
