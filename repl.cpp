@@ -1335,7 +1335,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     if (line.starts_with("#return ")) {
         line = line.substr(8);
 
-        line = "void exec() { printdata(((" + line + ")), \"custom\"); }\n";
+        line = "void exec() { printdata(((" + line +
+               ")), \"custom\", typeid(decltype((" + line + "))).name()); }\n";
 
         cfg.analyze = false;
     }
