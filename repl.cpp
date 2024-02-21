@@ -18,6 +18,7 @@
 #include <thread>
 #include <tuple>
 #include <unistd.h>
+#include <unordered_set>
 #include <utility>
 
 std::unordered_set<std::string> linkLibraries;
@@ -183,11 +184,15 @@ void analyzeInnerAST(
             if (!includedFrom_string.error()) {
                 std::filesystem::path p(lastfile);
 
-                p = std::filesystem::absolute(std::filesystem::canonical(p));
+                try {
+                    p = std::filesystem::absolute(
+                        std::filesystem::canonical(p));
+                } catch (...) {
+                }
 
                 std::string path = p.string();
 
-                if (p.filename() != "decl_amalgama.hpp" &&
+                if (!path.empty() && p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp" &&
                     includedFrom_string.value() == source &&
                     includedFiles.find(path) == includedFiles.end()) {
@@ -200,7 +205,21 @@ void analyzeInnerAST(
         std::error_code ec;
         if (!source.empty() && !lastfile.empty() &&
             !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
-            continue;
+            try {
+                auto canonical = std::filesystem::canonical(lastfile);
+
+                auto current =
+                    std::filesystem::canonical(std::filesystem::current_path());
+
+                if (!canonical.string().starts_with(current.string())) {
+                    continue;
+                }
+            } catch (const std::exception &e) {
+                std::cerr << e.what() << std::endl;
+                continue;
+            } catch (...) {
+                continue;
+            }
         }
 
         auto lline = loc["line"];
@@ -885,6 +904,8 @@ void prepareFunctionWrapper(
 
     wrapper += "#include \"decl_amalgama.hpp\"\n\n";
 
+    std::unordered_set<std::string> addedFns;
+
     for (const auto &fnvars : vars) {
         std::cout << fnvars.name << std::endl;
         if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl") {
@@ -895,7 +916,12 @@ void prepareFunctionWrapper(
             continue;
         }
 
+        if (addedFns.contains(fnvars.mangledName)) {
+            continue;
+        }
+
         if (!fnNames.contains(fnvars.mangledName)) {
+            addedFns.insert(fnvars.mangledName);
             auto qualTypestr = std::string(fnvars.qualType);
             auto parem = qualTypestr.find_first_of('(');
 

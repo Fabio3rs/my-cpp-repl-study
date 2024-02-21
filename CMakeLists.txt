@@ -26,4 +26,7 @@ target_link_libraries(cpprepl cpprepl_lib)
 # target_link_directories(libclangtest PRIVATE /usr/lib/llvm-15/lib)
 # target_link_libraries(libclangtest cpprepl_lib clang)
 
+add_executable(pistachetest pistache/main.cpp)
+target_link_libraries(pistachetest cpprepl_lib pistache)
+
 add_subdirectory(tests)
