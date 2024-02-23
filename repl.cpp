@@ -464,17 +464,21 @@ auto runProgramGetOutput(std::string_view cmd) {
 }
 
 void writeHeaderPrintOverloads() {
-    auto printer = R"cpp(
-#pragma once
-#include <iostream>
-#include <vector>
+    auto printer = R"cpp(#pragma once
 #include <deque>
+#include <iostream>
 #include <mutex>
+#include <ostream>
 #include <string_view>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 template <class T>
-inline void printdata(const std::vector<T> &vect, std::string_view name, std::string_view type) {
-    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
+inline void printdata(const std::vector<T> &vect, std::string_view name,
+                      std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": ";
     for (const auto &v : vect) {
         std::cout << v << ' ';
     }
@@ -483,8 +487,10 @@ inline void printdata(const std::vector<T> &vect, std::string_view name, std::st
 }
 
 template <class T>
-inline void printdata(const std::deque<T> &vect, std::string_view name, std::string_view type) {
-    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": ";
+inline void printdata(const std::deque<T> &vect, std::string_view name,
+                      std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": ";
     for (const auto &v : vect) {
         std::cout << v << ' ';
     }
@@ -492,20 +498,72 @@ inline void printdata(const std::deque<T> &vect, std::string_view name, std::str
     std::cout << std::endl;
 }
 
-inline void printdata(std::string_view str, std::string_view name, std::string_view type) {
-    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << str << std::endl;
+inline void printdata(std::string_view str, std::string_view name,
+                      std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << str << std::endl;
 }
 
-inline void printdata(const std::mutex &mtx, std::string_view name, std::string_view type) {
-    std::cout << " >> " << (name.empty()? "" : " ") << (name.empty()? "" : name) << "Mutex" << std::endl;
+inline void printdata(const std::mutex &mtx, std::string_view name,
+                      std::string_view type) {
+    std::cout << " >> " << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << "Mutex" << std::endl;
+}
+
+template <class T> struct is_printable {
+    static constexpr bool value =
+        std::is_same_v<decltype(std::cout << std::declval<T>()),
+                       std::ostream &>;
+};
+
+template <class K, class V>
+inline void printdata(const std::unordered_map<K, V> &map,
+                      std::string_view name, std::string_view type) {
+    if constexpr (is_printable<K>::value && is_printable<V>::value) {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": ";
+        for (const auto &m : map) {
+            std::cout << m.first << " : " << m.second << ' ';
+        }
+        std::cout << std::endl;
+    } else if constexpr (is_printable<K>::value) {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": ";
+        for (const auto &m : map) {
+            std::cout << m.first << " : "
+                      << "Not printable" << ' ';
+        }
+        std::cout << std::endl;
+    } else if constexpr (is_printable<V>::value) {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": ";
+        for (const auto &m : map) {
+            std::cout << "Not printable"
+                      << " : " << m.second << ' ';
+        }
+        std::cout << std::endl;
+    } else {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": "
+                  << "Not printable with " << map.size() << " elements"
+                  << std::endl;
+    }
 }
 
 template <class T>
-inline void printdata(const T &val, std::string_view name, std::string_view type) {
-    std::cout << " >> " << type << (name.empty()? "" : " ") << (name.empty()? "" : name) << ": " << val << std::endl;
+inline void printdata(const T &val, std::string_view name,
+                      std::string_view type) {
+    if constexpr (is_printable<T>::value) {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": " << val << std::endl;
+    } else {
+        std::cout << " >> " << type << (name.empty() ? "" : " ")
+                  << (name.empty() ? "" : name) << ": "
+                  << "Not printable" << std::endl;
+    }
 }
 
-    )cpp";
+)cpp";
 
     std::fstream printerOutput("printerOutput.hpp",
                                std::ios::out | std::ios::trunc);
@@ -761,11 +819,19 @@ auto analyzeCustomCommands(
                 purefilename.substr(0, purefilename.find_last_of('.'));
 
             std::string logname = purefilename + ".log";
-            std::string cmd = namecmd.second +
-                              " -std=gnu++20 -Xclang -ast-dump=json -include "
-                              "precompiledheader.hpp -fsyntax-only "
-                              " 2>" +
-                              logname;
+            std::string cmd = namecmd.second;
+
+            if ((namecmd.second.find("-std=gnu++20") != std::string::npos ||
+                 namecmd.second.find("-std=") == std::string::npos) &&
+                namecmd.second.find("-fvisibility=hidden") ==
+                    std::string::npos) {
+                cmd += " -std=gnu++20 -include "
+                       "precompiledheader.hpp";
+            }
+
+            cmd += " -Xclang -ast-dump=json  -fsyntax-only "
+                   " 2>" +
+                   logname;
 
             auto out = runProgramGetOutput(cmd);
 
@@ -957,7 +1023,7 @@ void prepareFunctionWrapper(
     std::unordered_map<std::string, std::string> &functions) {
     std::string wrapper;
 
-    wrapper += "#include \"decl_amalgama.hpp\"\n\n";
+    // wrapper += "#include \"decl_amalgama.hpp\"\n\n";
 
     std::unordered_set<std::string> addedFns;
 
@@ -980,15 +1046,16 @@ void prepareFunctionWrapper(
             auto qualTypestr = std::string(fnvars.qualType);
             auto parem = qualTypestr.find_first_of('(');
 
-            if (parem == std::string::npos || fnvars.kind != "FunctionDecl") {
-                qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
-                              fnvars.mangledName + "()";
-            } else {
+            // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
+            // {
+            qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
+                          fnvars.mangledName + "()";
+            /*} else {
                 qualTypestr.insert(parem,
                                    std::string(" __attribute__ ((naked)) " +
                                                fnvars.mangledName));
                 qualTypestr.insert(0, "extern \"C\" ");
-            }
+            }*/
 
             wrapper += "extern \"C\" void *" + fnvars.mangledName +
                        "_ptr = nullptr;\n\n";
