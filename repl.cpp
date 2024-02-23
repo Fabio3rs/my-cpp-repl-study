@@ -25,6 +25,10 @@ std::unordered_set<std::string> linkLibraries;
 std::unordered_set<std::string> includeDirectories;
 std::unordered_set<std::string> preprocessorDefinitions;
 
+void addIncludeDirectory(const std::string &dir) {
+    includeDirectories.insert(dir);
+}
+
 auto getLinkLibraries() -> std::unordered_set<std::string> {
     std::unordered_set<std::string> linkLibraries;
 
@@ -73,7 +77,7 @@ auto getPreprocessorDefinitionsStr() -> std::string {
 }
 
 int onlyBuildLib(std::string compiler, const std::string &name,
-                 std::string ext = ".cpp", std::string std = "c++20") {
+                 std::string ext = ".cpp", std::string std = "gnu++20") {
     std::string includePrecompiledHeader = " -include precompiledheader.hpp";
 
     if (ext == ".c") {
@@ -94,7 +98,7 @@ int onlyBuildLib(std::string compiler, const std::string &name,
 }
 
 int buildLibAndDumpAST(std::string compiler, const std::string &name,
-                       std::string ext = ".cpp", std::string std = "c++20") {
+                       std::string ext = ".cpp", std::string std = "gnu++20") {
     std::string includePrecompiledHeader = " -include precompiledheader.hpp";
 
     if (ext == ".c") {
@@ -127,16 +131,6 @@ int buildLibAndDumpAST(std::string compiler, const std::string &name,
 
 std::string outputHeader;
 std::unordered_set<std::string> includedFiles;
-
-struct VarDecl {
-    std::string name;
-    std::string mangledName;
-    std::string type;
-    std::string qualType;
-    std::string kind;
-    std::string file;
-    int line;
-};
 
 static std::mutex varsWriteMutex;
 
@@ -192,7 +186,9 @@ void analyzeInnerAST(
 
                 std::string path = p.string();
 
-                if (!path.empty() && p.filename() != "decl_amalgama.hpp" &&
+                if (!path.empty() && !path.ends_with(".cpp") &&
+                    !path.ends_with(".cc") &&
+                    p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp" &&
                     includedFrom_string.value() == source &&
                     includedFiles.find(path) == includedFiles.end()) {
@@ -543,7 +539,7 @@ int build_precompiledheader(std::string compiler = "clang++") {
 
     std::string cmd = compiler + getPreprocessorDefinitionsStr() + " " +
                       getIncludeDirectoriesStr() +
-                      " -fPIC -x c++-header -std=c++20 -o "
+                      " -fPIC -x c++-header -std=gnu++20 -o "
                       "precompiledheader.hpp.pch precompiledheader.hpp";
     return system(cmd.c_str());
 }
@@ -662,7 +658,7 @@ auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
     -> std::vector<VarDecl> {
     auto cmd = compiler + getPreprocessorDefinitionsStr() + " " +
                getIncludeDirectoriesStr() +
-               " -std=c++20 -fPIC -Xclang -ast-dump=json -include "
+               " -std=gnu++20 -fPIC -Xclang -ast-dump=json -include "
                "precompiledheader.hpp -fsyntax-only " +
                name + ".cpp -o lib" + name + ".so > " + name + ".json";
 
@@ -680,7 +676,7 @@ auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
 
     cmd = compiler + getPreprocessorDefinitionsStr() + " " +
           getIncludeDirectoriesStr() +
-          " -std=c++20 -shared -include precompiledheader.hpp -g "
+          " -std=gnu++20 -shared -include precompiledheader.hpp -g "
           "-Wl,--export-dynamic -fPIC " +
           name + ".cpp " + getLinkLibrariesStr() +
           " -o "
@@ -745,6 +741,65 @@ void mergeVars(const std::vector<VarDecl> &vars) {
             allTheVariables.push_back(var);
         }
     }
+}
+
+auto analyzeCustomCommands(
+    const std::unordered_map<std::string, std::string> &commands)
+    -> std::pair<std::vector<VarDecl>, int> {
+    std::pair<std::vector<VarDecl>, int> resultc;
+
+    std::for_each(
+        std::execution::par, commands.begin(), commands.end(),
+        [&](const auto &namecmd) {
+            if (namecmd.first.empty()) {
+                return;
+            }
+            const auto path = std::filesystem::path(namecmd.first);
+            std::string purefilename = path.filename().string();
+
+            purefilename =
+                purefilename.substr(0, purefilename.find_last_of('.'));
+
+            std::string logname = purefilename + ".log";
+            std::string cmd = namecmd.second +
+                              " -std=gnu++20 -Xclang -ast-dump=json -include "
+                              "precompiledheader.hpp -fsyntax-only "
+                              " 2>" +
+                              logname;
+
+            auto out = runProgramGetOutput(cmd);
+
+            if (out.second != 0) {
+                std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
+                          << " " << cmd << std::endl;
+                std::fstream file(logname, std::ios::in);
+
+                std::copy(std::istreambuf_iterator<char>(file),
+                          std::istreambuf_iterator<char>(),
+                          std::ostreambuf_iterator<char>(std::cerr));
+                resultc.second = out.second;
+                return;
+            }
+
+            simdjson::padded_string_view json(out.first);
+            analyzeASTFromJsonString(json, namecmd.first, resultc.first);
+        });
+
+    return resultc;
+}
+
+auto linkAllObjects(const std::vector<std::string> &objects,
+                    const std::string &libname) -> int {
+    std::string linkLibraries = getLinkLibrariesStr();
+
+    std::string namesConcated = concatNames(objects);
+
+    std::string cmd;
+
+    cmd = "clang++ -shared -g -WL,--export-dynamic " + namesConcated + " " +
+          linkLibraries + " -o lib" + libname + ".so";
+    std::cout << cmd << std::endl;
+    return system(cmd.c_str());
 }
 
 auto buildLibAndDumpASTWithoutPrint(std::string compiler,
@@ -817,7 +872,7 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
 
                 std::string cmd =
                     compiler + preprocessorDefinitions + " " + includes +
-                    " -std=c++20 -fPIC  -c -Xclang "
+                    " -std=gnu++20 -fPIC  -c -Xclang "
                     "-include-pch -Xclang precompiledheader.hpp.pch "
                     "-include precompiledheader.hpp "
                     "-g -fPIC " +
@@ -1020,7 +1075,7 @@ bool shouldRecompilePrecompiledHeader = false;
 
 struct CompilerCodeCfg {
     std::string compiler = "clang++";
-    std::string std = "c++20";
+    std::string std = "gnu++20";
     std::string extension = "cpp";
     std::string repl_name;
     std::string libraryName;
@@ -1368,6 +1423,39 @@ int __attribute__((visibility("default"))) (*bootstrapProgram)(
     int argc, char **argv) = nullptr;
 
 int64_t replCounter = 0;
+
+auto compileAndRunCodeCustom(
+    const std::unordered_map<std::string, std::string> &commands,
+    const std::vector<std::string> &objects) -> bool {
+    auto now = std::chrono::steady_clock::now();
+
+    auto [vars, returnCode] = analyzeCustomCommands(commands);
+
+    if (returnCode != 0) {
+        return false;
+    }
+
+    CompilerCodeCfg cfg;
+    cfg.repl_name = "custom_lib_" + std::to_string(replCounter++);
+
+    returnCode = linkAllObjects(objects, cfg.repl_name);
+
+    if (returnCode != 0) {
+        return false;
+    }
+
+    mergeVars(vars);
+
+    auto end = std::chrono::steady_clock::now();
+
+    std::cout << "build time: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       now)
+                     .count()
+              << "ms" << std::endl;
+
+    return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
+}
 
 auto extExecRepl(std::string_view lineview) -> bool {
     return execRepl(lineview, replCounter);
