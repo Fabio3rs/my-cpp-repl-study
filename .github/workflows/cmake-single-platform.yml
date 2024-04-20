@@ -25,6 +25,9 @@ jobs:
     - name: Install gtest manually
       run: sudo apt-get install libgtest-dev
 
+    - name: Install libnotify
+      run: sudo apt-get install libnotify-dev
+
     - name: Install libtbb
       run: sudo apt-get install libtbb-dev
 
