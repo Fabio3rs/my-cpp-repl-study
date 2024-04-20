@@ -9,6 +9,8 @@ extern int
     __attribute__((visibility("default"))) (*bootstrapProgram)(int argc,
                                                                char **argv);
 
+void initNotifications(std::string_view appName);
+void notifyError(std::string_view summary, std::string_view msg);
 void initRepl();
 void repl();
 bool extExecRepl(std::string_view cmd);

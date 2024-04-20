@@ -1,5 +1,7 @@
 #include "stdafx.hpp"
 
+#include "backtraced_exceptions.hpp"
+
 #include "repl.hpp"
 #include "simdjson.h"
 #include <algorithm>
@@ -7,7 +9,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <execution>
 #include <filesystem>
 #include <functional>
@@ -1152,6 +1156,7 @@ struct CompilerCodeCfg {
     bool addIncludes = true;
     bool fileWrap = true;
     bool lazyEval = false;
+    bool use_cpp2 = false;
 };
 
 void evalEverything() {
@@ -1214,6 +1219,16 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
             } catch (const std::exception &e) {
                 std::cerr << "C++ exception on exec/eval: " << e.what()
                           << std::endl;
+
+                auto [btrace, size] =
+                    backtraced_exceptions::get_backtrace_for(e);
+
+                if (btrace != nullptr && size > 0) {
+                    std::cerr << "Backtrace: " << std::endl;
+                    backtrace_symbols_fd(btrace, size, 2);
+                } else {
+                    std::cerr << "Backtrace not available" << std::endl;
+                }
             } catch (...) {
                 std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
             }
@@ -1288,6 +1303,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
 
     return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
 }
+
+bool useCpp2 = false;
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     std::string line(lineview);
@@ -1368,6 +1385,16 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
+    if (line.starts_with("#cpp2")) {
+        useCpp2 = true;
+        return true;
+    }
+
+    if (line.starts_with("#cpp1")) {
+        useCpp2 = false;
+        return true;
+    }
+
     if (varsNames.contains(line)) {
         auto it = varPrinterAddresses.find(line);
 
@@ -1403,6 +1430,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     CompilerCodeCfg cfg;
 
     cfg.lazyEval = line.starts_with("#lazyeval ");
+    cfg.use_cpp2 = useCpp2;
 
     if (line.starts_with("#batch_eval ")) {
         line = line.substr(11);
@@ -1440,6 +1468,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 cfg.addIncludes = false;
             }
 
+            cfg.use_cpp2 = (textension == "cpp2");
+
             if (textension == "c") {
                 cfg.extension = textension;
                 cfg.analyze = false;
@@ -1468,7 +1498,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     cfg.repl_name = "repl_" + std::to_string(i++);
 
     if (cfg.fileWrap) {
-        std::fstream replOutput(cfg.repl_name + "." + cfg.extension,
+        std::fstream replOutput(cfg.repl_name + "." +
+                                    (cfg.use_cpp2 ? "cpp2" : cfg.extension),
                                 std::ios::out | std::ios::trunc);
 
         if (cfg.addIncludes) {
@@ -1479,6 +1510,16 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         replOutput << line << std::endl;
 
         replOutput.close();
+    }
+
+    if (cfg.use_cpp2) {
+        int cppfrontres =
+            system(("./cppfront " + cfg.repl_name + ".cpp2").c_str());
+
+        if (cppfrontres != 0) {
+            std::cerr << "cppfrontres != 0: " << cfg.repl_name << std::endl;
+            return false;
+        }
     }
 
     compileAndRunCode(std::move(cfg));
@@ -1559,6 +1600,29 @@ void initRepl() {
                                std::ios::out | std::ios::trunc);
     printerOutput << outputHeader << std::endl;
     printerOutput.close();
+}
+
+void initNotifications(std::string_view appName) {
+#ifndef NUSELIBNOTIFY
+    notify_init(appName.data());
+#else
+    std::cerr << "Notifications not available" << std::endl;
+#endif
+}
+
+void notifyError(std::string_view summary, std::string_view msg) {
+#ifndef NUSELIBNOTIFY
+    NotifyNotification *notification = notify_notification_new(
+        summary.data(), msg.data(), "/home/fabio/Downloads/icons8-erro-64.png");
+
+    // Set the urgency level of the notification
+    notify_notification_set_urgency(notification, NOTIFY_URGENCY_CRITICAL);
+
+    // Show the notification
+    notify_notification_show(notification, NULL);
+#else
+    std::cerr << summary << ": " << msg << std::endl;
+#endif
 }
 
 std::any getResultRepl(std::string cmd) {

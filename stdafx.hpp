@@ -1,6 +1,12 @@
 #pragma once
 
 #include "simdjson.h"
+
+#ifndef NUSELIBNOTIFY
+#include <libnotify/notification.h>
+#include <libnotify/notify.h>
+#endif
+
 #include <any>
 #include <chrono>
 #include <cstdlib>

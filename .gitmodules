@@ -4,3 +4,6 @@
 [submodule "editor"]
 	path = editor
 	url = https://github.com/Fabio3rs/editor
+[submodule "segvcatch"]
+	path = segvcatch
+	url = https://github.com/Plaristote/segvcatch.git
