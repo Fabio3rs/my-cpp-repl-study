@@ -2,6 +2,7 @@
 
 #include "repl.hpp"
 #include <cstdint>
+#include <exceptdefs.h>
 #include <execinfo.h>
 #include <iostream>
 #include <segvcatch.h>
@@ -12,9 +13,16 @@
 
 using namespace std;
 
-void handle_segv() { throw std::runtime_error("My SEGV"); }
+void handle_segv(const segvcatch::hardware_exception_info &info) {
+    throw std::runtime_error(
+        "My SEGV at: " +
+        std::to_string(reinterpret_cast<uintptr_t>(info.addr)));
+}
 
-void handle_fpe() { throw std::runtime_error("My FPE"); }
+void handle_fpe(const segvcatch::hardware_exception_info &info) {
+    throw std::runtime_error(
+        "My FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)));
+}
 
 void segfaultHandler(int sig) {
     std::cerr << "Segmentation fault AAAAAAAAAAAAAA" << std::endl;
