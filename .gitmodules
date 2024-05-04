@@ -7,3 +7,6 @@
 [submodule "segvcatch"]
 	path = segvcatch
 	url = https://github.com/Fabio3rs/segvcatch.git
+[submodule "ninja"]
+	path = ninja
+	url = https://github.com/Fabio3rs/ninja
