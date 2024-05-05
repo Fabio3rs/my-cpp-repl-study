@@ -8,6 +8,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <dlfcn.h>
@@ -15,8 +16,10 @@
 #include <execution>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -225,7 +228,19 @@ void analyzeInnerAST(
         auto lline = loc["line"];
 
         if (lline.error()) {
-            continue;
+            auto spellingLoc = loc["spellingLoc"];
+
+            if (spellingLoc.error()) {
+                continue;
+            }
+
+            lline = spellingLoc["line"];
+
+            if (lline.error()) {
+                continue;
+            }
+
+            loc = spellingLoc;
         }
 
         auto lline_int = lline.get_int64();
@@ -1022,6 +1037,97 @@ int runPrintAll() {
     return EXIT_SUCCESS;
 }
 
+#define MAX_LINE_LENGTH 1024
+
+auto get_symbol_address(const char *library_name, const char *symbol_name)
+    -> uintptr_t {
+    FILE *maps_file{};
+    char line[MAX_LINE_LENGTH]{};
+    char library_path[MAX_LINE_LENGTH]{};
+    uintptr_t start_address{}, end_address{};
+    char command[MAX_LINE_LENGTH]{};
+    uintptr_t symbol_offset = 0;
+
+    // Open /proc/self/maps
+    maps_file = fopen("/proc/self/maps", "r");
+    if (maps_file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Search for the library in memory maps
+    while (fgets(line, MAX_LINE_LENGTH, maps_file) != NULL) {
+        *library_path = 0;
+        int readed = sscanf(line, "%zx-%zx %*s %*s %*s %*s %s", &start_address,
+                            &end_address, library_path);
+        std::cout << readed << "   " << library_path << "   " << library_name
+                  << std::endl;
+        if (strnlen(library_path, std::size(library_path)) == 0) {
+            continue;
+        }
+
+        if (std::filesystem::equivalent(library_path, library_name)) {
+            // Get the base address of the library
+            break;
+        }
+    }
+
+    if (strlen(library_path) == 0) {
+        printf("Library %s not found in memory maps.\n", library_name);
+        return 0;
+    }
+
+    // Get the address of the symbol within the library using nm
+    sprintf(command, "nm -D --defined-only %s | grep ' %s$'", library_path,
+            symbol_name);
+    FILE *symbol_address_command = popen(command, "r");
+    if (symbol_address_command == NULL) {
+        perror("popen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse the output of nm command to get the symbol address
+    if (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL) {
+        char address[17]; // Assuming address length of 16 characters
+        sscanf(line, "%16s", address);
+        sscanf(address, "%zx",
+               &symbol_offset); // Convert hex string to unsigned long
+        printf("Address of symbol %s in %s: 0x%zx\n", symbol_name, library_name,
+               start_address + symbol_offset);
+    } else {
+        printf("Symbol %s not found in %s.\n", symbol_name, library_name);
+    }
+
+    pclose(symbol_address_command);
+
+    fclose(maps_file);
+
+    return start_address + symbol_offset;
+}
+
+std::string lastLibrary;
+
+extern "C" void loadfnToPtr(void **ptr, const char *name) {
+    std::cout << "Function segfaulted: " << name
+              << "   library: " << lastLibrary << std::endl;
+
+    auto address = get_symbol_address(lastLibrary.c_str(), name);
+
+    if (address == 0) {
+        std::cerr << "Function segfaulted: " << name
+                  << "   library: " << lastLibrary << std::endl;
+        return;
+    }
+
+    std::cout << std::hex << address << std::endl;
+    std::cout << std::hex << address << std::endl;
+    std::cout << std::hex << address << std::endl;
+
+    asm("int $3\n\n");
+
+    *ptr = reinterpret_cast<void *>(address);
+}
+
 void prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     std::unordered_map<std::string, std::string> &functions) {
@@ -1061,8 +1167,12 @@ void prepareFunctionWrapper(
                 qualTypestr.insert(0, "extern \"C\" ");
             }*/
 
+            wrapper += "static void __attribute__((naked)) loadFn_" +
+                       fnvars.mangledName + "();\n";
+
             wrapper += "extern \"C\" void *" + fnvars.mangledName +
-                       "_ptr = nullptr;\n\n";
+                       "_ptr = reinterpret_cast<void*>(loadFn_" +
+                       fnvars.mangledName + ");\n\n";
             wrapper += qualTypestr + " {\n";
             wrapper += R"(    __asm__ __volatile__ (
         "jmp *%0\n"
@@ -1072,6 +1182,91 @@ void prepareFunctionWrapper(
     );
 }
 )";
+
+            wrapper += "static void __attribute__((naked)) loadFn_" +
+                       fnvars.mangledName + "() {\n";
+
+            wrapper += R"(
+    __asm__(
+        // Save all general-purpose registers
+        "pushq   %rax                \n"
+        "pushq   %rbx                \n"
+        "pushq   %rcx                \n"
+        "pushq   %rdx                \n"
+        "pushq   %rsi                \n"
+        "pushq   %rdi                \n"
+        "pushq   %rbp                \n"
+        "pushq   %r8                 \n"
+        "pushq   %r9                 \n"
+        "pushq   %r10                \n"
+        "pushq   %r11                \n"
+        "pushq   %r12                \n"
+        "pushq   %r13                \n"
+        "pushq   %r14                \n"
+        "pushq   %r15                \n"
+        "pushq   %rbp                \n" // Save Base Pointer
+        "movq    %rsp, %rbp          \n" // Set Base Pointer
+    );
+        // Push parameters onto the stack
+        //"leaq    _Z21qRegisterResourceDataiPKhS0_S0__ptr(%rip), %rax  \n" // Address of pointer
+    __asm__ __volatile__ (
+        "movq %0, %%rax"
+        :
+        : "r" (&)" + fnvars.mangledName +
+                       R"(_ptr)
+    );
+
+    __asm__(
+        // Push parameters onto the stack
+        //"leaq    )" + fnvars.mangledName +
+                       R"(_ptr(%rip), %rax  \n" // Address
+                                                                          // of
+                                                                          // pointer
+        "movq    %rax, %rdi          \n" // Parameter 1: pointer address
+        "leaq    .LC)" +
+                       fnvars.mangledName +
+                       R"((%rip), %rsi    \n" // Address of string "a"
+        "pushq   %rsi                \n" // Push the address of the string
+        "pushq   %rdi                \n" // Push the address of the pointer
+
+        // Call loadfnToPtr function
+        "call    loadfnToPtr  \n" // Call loadfnToPtr function
+
+        "popq    %rbp                \n" // Restore Base Pointer
+
+        // Restore all general-purpose registers
+        "popq    %r15                \n"
+        "popq    %r14                \n"
+        "popq    %r13                \n"
+        "popq    %r12                \n"
+        "popq    %r11                \n"
+        "popq    %r10                \n"
+        "popq    %r9                 \n"
+        "popq    %r8                 \n"
+        "popq    %rbp                \n"
+        "popq    %rdi                \n"
+        "popq    %rsi                \n"
+        "popq    %rdx                \n"
+        "popq    %rcx                \n"
+        "popq    %rbx                \n"
+        "popq    %rax                \n");
+
+    __asm__ __volatile__("jmp *%0\n"
+                         :
+                         : "r"()" +
+                       fnvars.mangledName +
+                       R"(_ptr));
+
+
+    __asm__(".section .rodata            \n"
+            ".LC)" + fnvars.mangledName +
+                       R"(:                        \n"
+            ".string \")" +
+                       fnvars.mangledName +
+                       R"(\"                \n");
+    __asm__(".section .text            \n");
+}
+            )";
         }
 
         functions[fnvars.mangledName] = fnvars.name;
@@ -1178,6 +1373,11 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     if (!functions.empty()) {
         handlewp = dlopen(("./libwrapper_" + cfg.repl_name + ".so").c_str(),
                           RTLD_NOW | RTLD_GLOBAL);
+
+        if (!handlewp) {
+            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            // return false;
+        }
     }
 
     int dlOpenFlags = RTLD_NOW | RTLD_GLOBAL;
@@ -1189,13 +1389,21 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     auto load_start = std::chrono::steady_clock::now();
 
-    void *handle =
-        dlopen(("./lib" + cfg.repl_name + ".so").c_str(), dlOpenFlags);
+    lastLibrary = ("./lib" + cfg.repl_name + ".so");
+
+    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
                   << " Cannot open library: " << dlerror() << '\n';
         return false;
     }
+
+    /*if (!cfg.lazyEval) {
+        fillWrapperPtrs(functions, handlewp, handle);
+    }
+
+    handle = dlopen(("./lib" + cfg.repl_name + ".so").c_str(),
+                    dlOpenFlags | RTLD_NOLOAD);*/
 
     auto load_end = std::chrono::steady_clock::now();
 
