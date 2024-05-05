@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <execution>
@@ -1039,6 +1040,53 @@ int runPrintAll() {
 
 #define MAX_LINE_LENGTH 1024
 
+auto get_library_start_address(const char *library_name) -> uintptr_t {
+    std::string line(MAX_LINE_LENGTH, 0);
+    std::string library_path(MAX_LINE_LENGTH, 0);
+    uintptr_t start_address{}, end_address{};
+
+    // Open /proc/self/maps
+    FILE *maps_file = fopen("/proc/self/maps", "r");
+    if (maps_file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Search for the library in memory maps
+    while (fgets(line.data(), MAX_LINE_LENGTH, maps_file) != NULL) {
+        library_path.front() = 0;
+        line.back() = 0;
+        line[strcspn(line.data(), "\n")] = 0;
+        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
+                  << std::endl;
+        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
+                  << std::endl;
+        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
+                  << std::endl;
+        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
+                  << std::endl;
+        try {
+            sscanf(line.c_str(), "%zx-%zx %*s %*s %*s %*s %1023s",
+                   &start_address, &end_address, library_path.data());
+            std::error_code ec;
+            if (std::filesystem::equivalent(library_path, library_name, ec) &&
+                !ec) {
+                break;
+            }
+        } catch (...) {
+        }
+    }
+
+    if (library_path.front() == 0) {
+        printf("Library %s not found in memory maps.\n", library_name);
+        return 0;
+    }
+
+    fclose(maps_file);
+
+    return start_address;
+}
+
 auto get_symbol_address(const char *library_name, const char *symbol_name)
     -> uintptr_t {
     FILE *maps_file{};
@@ -1106,26 +1154,28 @@ auto get_symbol_address(const char *library_name, const char *symbol_name)
 }
 
 std::string lastLibrary;
+std::unordered_map<std::string, uintptr_t> symbolsToResolve;
 
 extern "C" void loadfnToPtr(void **ptr, const char *name) {
     std::cout << "Function segfaulted: " << name
               << "   library: " << lastLibrary << std::endl;
 
-    auto address = get_symbol_address(lastLibrary.c_str(), name);
+    auto base = get_library_start_address(lastLibrary.c_str());
 
-    if (address == 0) {
-        std::cerr << "Function segfaulted: " << name
-                  << "   library: " << lastLibrary << std::endl;
+    if (base == 0) {
         return;
     }
 
-    std::cout << std::hex << address << std::endl;
-    std::cout << std::hex << address << std::endl;
-    std::cout << std::hex << address << std::endl;
+    for (const auto &[symbol, offset] : symbolsToResolve) {
+        void **wrap_ptrfn =
+            (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
 
-    asm("int $3\n\n");
+        if (wrap_ptrfn == nullptr) {
+            continue;
+        }
 
-    *ptr = reinterpret_cast<void *>(address);
+        *wrap_ptrfn = reinterpret_cast<void *>(base + offset);
+    }
 }
 
 void prepareFunctionWrapper(
@@ -1204,7 +1254,6 @@ void prepareFunctionWrapper(
         "pushq   %r13                \n"
         "pushq   %r14                \n"
         "pushq   %r15                \n"
-        "pushq   %rbp                \n" // Save Base Pointer
         "movq    %rsp, %rbp          \n" // Set Base Pointer
     );
         // Push parameters onto the stack
@@ -1226,13 +1275,9 @@ void prepareFunctionWrapper(
         "leaq    .LC)" +
                        fnvars.mangledName +
                        R"((%rip), %rsi    \n" // Address of string "a"
-        "pushq   %rsi                \n" // Push the address of the string
-        "pushq   %rdi                \n" // Push the address of the pointer
 
         // Call loadfnToPtr function
         "call    loadfnToPtr  \n" // Call loadfnToPtr function
-
-        "popq    %rbp                \n" // Restore Base Pointer
 
         // Restore all general-purpose registers
         "popq    %r15                \n"
@@ -1250,7 +1295,6 @@ void prepareFunctionWrapper(
         "popq    %rcx                \n"
         "popq    %rbx                \n"
         "popq    %rax                \n");
-
     __asm__ __volatile__("jmp *%0\n"
                          :
                          : "r"()" +
@@ -1391,6 +1435,30 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     lastLibrary = ("./lib" + cfg.repl_name + ".so");
 
+    if (!functions.empty()) {
+        char command[1024]{};
+        sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
+        FILE *symbol_address_command = popen(command, "r");
+        if (symbol_address_command == NULL) {
+            perror("popen");
+            exit(EXIT_FAILURE);
+        }
+
+        char line[1024]{};
+
+        while (fgets(line, 1024, symbol_address_command) != NULL) {
+            uintptr_t symbol_offset = 0;
+            char symbol_name[256];
+            sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
+
+            if (functions.contains(symbol_name)) {
+                symbolsToResolve[symbol_name] = symbol_offset;
+            }
+        }
+
+        pclose(symbol_address_command);
+    }
+
     void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
@@ -1398,12 +1466,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
         return false;
     }
 
-    /*if (!cfg.lazyEval) {
-        fillWrapperPtrs(functions, handlewp, handle);
-    }
-
-    handle = dlopen(("./lib" + cfg.repl_name + ".so").c_str(),
-                    dlOpenFlags | RTLD_NOLOAD);*/
+    symbolsToResolve.clear();
 
     auto load_end = std::chrono::steady_clock::now();
 
