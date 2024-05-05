@@ -25,6 +25,21 @@ struct VarDecl {
     int line;
 };
 
+struct CompilerCodeCfg {
+    std::string compiler = "clang++";
+    std::string std = "gnu++20";
+    std::string extension = "cpp";
+    std::string repl_name;
+    std::string libraryName;
+    std::string wrapperName;
+    std::vector<std::string> sourcesList;
+    bool analyze = true;
+    bool addIncludes = true;
+    bool fileWrap = true;
+    bool lazyEval = false;
+    bool use_cpp2 = false;
+};
+
 auto analyzeCustomCommands(
     const std::unordered_map<std::string, std::string> &commands)
     -> std::pair<std::vector<VarDecl>, int>;

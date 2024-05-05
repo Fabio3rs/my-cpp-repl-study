@@ -13,6 +13,8 @@ find_package(GTest)
 include_directories(SYSTEM segvcatch/lib)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 add_subdirectory(segvcatch/lib)
+#add_compile_options(-fno-omit-frame-pointer -fsanitize=address -fsanitize=alignment -fsanitize=bool -fsanitize=bounds -fsanitize=enum -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=integer-divide-by-zero -fsanitize=leak -fsanitize=nonnull-attribute -fsanitize=pointer-compare -fsanitize=pointer-overflow -fsanitize=pointer-subtract -fsanitize=return -fsanitize=returns-nonnull-attribute -fsanitize=shift -fsanitize=signed-integer-overflow -fsanitize=undefined -fsanitize=unreachable -fsanitize=vla-bound -fsanitize=vptr -g)
+#add_link_options(-fno-omit-frame-pointer -fsanitize=address -fsanitize=alignment -fsanitize=bool -fsanitize=bounds -fsanitize=enum -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=integer-divide-by-zero -fsanitize=leak -fsanitize=nonnull-attribute -fsanitize=pointer-compare -fsanitize=pointer-overflow -fsanitize=pointer-subtract -fsanitize=return -fsanitize=returns-nonnull-attribute -fsanitize=shift -fsanitize=signed-integer-overflow -fsanitize=undefined -fsanitize=unreachable -fsanitize=vla-bound -fsanitize=vptr -g)
 
 include(CPack)
 find_package(PkgConfig REQUIRED)
@@ -26,7 +28,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_link_options(-Wl,--export-dynamic)
 
-add_library(cpprepl_lib repl.cpp simdjson.cpp simdjson.h utility/backtraced_exceptions.cpp)
+add_library(cpprepl_lib repl.cpp simdjson.cpp simdjson.h utility/backtraced_exceptions.cpp printerOverloads.cpp)
 target_precompile_headers(cpprepl_lib PUBLIC stdafx.hpp)
 target_link_libraries(cpprepl_lib pthread dl tbb)
 

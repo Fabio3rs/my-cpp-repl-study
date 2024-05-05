@@ -1,6 +1,7 @@
 #include "stdafx.hpp"
 
 #include "backtraced_exceptions.hpp"
+#include "printerOverloads.hpp"
 
 #include "repl.hpp"
 #include "simdjson.h"
@@ -20,7 +21,6 @@
 #include <iterator>
 #include <mutex>
 #include <numeric>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -481,116 +481,6 @@ auto runProgramGetOutput(std::string_view cmd) {
     buffer.resize(finalSize);
 
     return result;
-}
-
-void writeHeaderPrintOverloads() {
-    auto printer = R"cpp(#pragma once
-#include <deque>
-#include <iostream>
-#include <mutex>
-#include <ostream>
-#include <string_view>
-#include <type_traits>
-#include <unordered_map>
-#include <vector>
-
-template <class T>
-inline void printdata(const std::vector<T> &vect, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << type << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << ": ";
-    for (const auto &v : vect) {
-        std::cout << v << ' ';
-    }
-
-    std::cout << std::endl;
-}
-
-template <class T>
-inline void printdata(const std::deque<T> &vect, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << type << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << ": ";
-    for (const auto &v : vect) {
-        std::cout << v << ' ';
-    }
-
-    std::cout << std::endl;
-}
-
-inline void printdata(std::string_view str, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << type << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << ": " << str << std::endl;
-}
-
-inline void printdata(const std::mutex &mtx, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << "Mutex" << std::endl;
-}
-
-template <class T> struct is_printable {
-    static constexpr bool value =
-        std::is_same_v<decltype(std::cout << std::declval<T>()),
-                       std::ostream &>;
-};
-
-template <class K, class V>
-inline void printdata(const std::unordered_map<K, V> &map,
-                      std::string_view name, std::string_view type) {
-    if constexpr (is_printable<K>::value && is_printable<V>::value) {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": ";
-        for (const auto &m : map) {
-            std::cout << m.first << " : " << m.second << ' ';
-        }
-        std::cout << std::endl;
-    } else if constexpr (is_printable<K>::value) {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": ";
-        for (const auto &m : map) {
-            std::cout << m.first << " : "
-                      << "Not printable" << ' ';
-        }
-        std::cout << std::endl;
-    } else if constexpr (is_printable<V>::value) {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": ";
-        for (const auto &m : map) {
-            std::cout << "Not printable"
-                      << " : " << m.second << ' ';
-        }
-        std::cout << std::endl;
-    } else {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": "
-                  << "Not printable with " << map.size() << " elements"
-                  << std::endl;
-    }
-}
-
-template <class T>
-inline void printdata(const T &val, std::string_view name,
-                      std::string_view type) {
-    if constexpr (is_printable<T>::value) {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": " << val << std::endl;
-    } else {
-        std::cout << " >> " << type << (name.empty() ? "" : " ")
-                  << (name.empty() ? "" : name) << ": "
-                  << "Not printable" << std::endl;
-    }
-}
-
-)cpp";
-
-    std::fstream printerOutput("printerOutput.hpp",
-                               std::ios::out | std::ios::trunc);
-
-    printerOutput << printer << std::endl;
-
-    printerOutput.close();
 }
 
 int build_precompiledheader(std::string compiler = "clang++") {
@@ -1153,13 +1043,24 @@ auto get_symbol_address(const char *library_name, const char *symbol_name)
     return start_address + symbol_offset;
 }
 
+/*
+ * Added to [try to] solve the problem of the function not being loaded when the
+ * library initializes
+ */
 std::string lastLibrary;
 std::unordered_map<std::string, uintptr_t> symbolsToResolve;
 
 extern "C" void loadfnToPtr(void **ptr, const char *name) {
+    /*
+     * Function related to loadFn_"funcion name", this function is called when
+     * the library constructor tries to run and the function is not loaded yet.
+     */
     std::cout << "Function segfaulted: " << name
               << "   library: " << lastLibrary << std::endl;
 
+    /*
+     * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
+     */
     auto base = get_library_start_address(lastLibrary.c_str());
 
     if (base == 0) {
@@ -1217,6 +1118,11 @@ void prepareFunctionWrapper(
                 qualTypestr.insert(0, "extern \"C\" ");
             }*/
 
+            /*
+             * This is the function that will be called when the library
+             * initializes and the functions are not ready yet, it will try to
+             * load the function address and set it to the pointer
+             */
             wrapper += "static void __attribute__((naked)) loadFn_" +
                        fnvars.mangledName + "();\n";
 
@@ -1236,6 +1142,10 @@ void prepareFunctionWrapper(
             wrapper += "static void __attribute__((naked)) loadFn_" +
                        fnvars.mangledName + "() {\n";
 
+            /*
+             * Observations: Keep the stack aligned in 16 bytes before calling a
+             * function
+             */
             wrapper += R"(
     __asm__(
         // Save all general-purpose registers
@@ -1382,21 +1292,6 @@ void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
 std::any lastReplResult;
 std::vector<std::function<bool()>> lazyEvalFns;
 bool shouldRecompilePrecompiledHeader = false;
-
-struct CompilerCodeCfg {
-    std::string compiler = "clang++";
-    std::string std = "gnu++20";
-    std::string extension = "cpp";
-    std::string repl_name;
-    std::string libraryName;
-    std::string wrapperName;
-    std::vector<std::string> sourcesList;
-    bool analyze = true;
-    bool addIncludes = true;
-    bool fileWrap = true;
-    bool lazyEval = false;
-    bool use_cpp2 = false;
-};
 
 void evalEverything() {
     for (const auto &fn : lazyEvalFns) {
