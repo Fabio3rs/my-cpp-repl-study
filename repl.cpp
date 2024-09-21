@@ -1742,7 +1742,7 @@ void repl() {
     std::string line;
 
     std::string_view historyFile = "history.txt";
-    if (!read_history(historyFile.data())) {
+    if (read_history(historyFile.data()) != 0) {
         perror("Failed to read history");
     }
 
