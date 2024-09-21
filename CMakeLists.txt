@@ -21,6 +21,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBNOTIFY REQUIRED IMPORTED_TARGET libnotify)
 find_package(TBB REQUIRED)
 
+pkg_check_modules(READLINE REQUIRED readline)
+
 option(ENABLE_NOTIFICATIONS "Enable desktop notifications" ON)
 
 # export commands
@@ -30,7 +32,7 @@ add_link_options(-Wl,--export-dynamic)
 
 add_library(cpprepl_lib repl.cpp simdjson.cpp simdjson.h utility/backtraced_exceptions.cpp printerOverloads.cpp)
 target_precompile_headers(cpprepl_lib PUBLIC stdafx.hpp)
-target_link_libraries(cpprepl_lib pthread dl tbb)
+target_link_libraries(cpprepl_lib pthread dl tbb readline)
 
 if (ENABLE_NOTIFICATIONS)
     target_link_libraries(cpprepl_lib PkgConfig::LIBNOTIFY)

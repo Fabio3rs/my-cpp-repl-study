@@ -21,7 +21,10 @@
 #include <iterator>
 #include <mutex>
 #include <numeric>
+#include <readline/history.h>
+#include <readline/readline.h>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <tuple>
@@ -1738,11 +1741,21 @@ auto extExecRepl(std::string_view lineview) -> bool {
 void repl() {
     std::string line;
 
+    std::string_view historyFile = "history.txt";
+    if (!read_history(historyFile.data())) {
+        perror("Failed to read history");
+    }
+
     while (true) {
-        std::cout << ">>> ";
-        if (!std::getline(std::cin, line)) {
+        char *input = readline(">>> ");
+
+        if (input == nullptr) {
             break;
         }
+
+        line = input;
+        free(input);
+        add_history(line.c_str());
 
         if (!extExecRepl(line)) {
             break;
@@ -1751,6 +1764,10 @@ void repl() {
         if (bootstrapProgram) {
             break;
         }
+    }
+
+    if (write_history(historyFile.data()) != 0) {
+        perror("Failed to write history");
     }
 }
 
