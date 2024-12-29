@@ -1439,6 +1439,116 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     return true;
 }
 
+bool loadPrebuilt(const std::string &path) {
+    char command[2048]{}, line[MAX_LINE_LENGTH]{};
+
+    std::vector<VarDecl> vars;
+    std::unordered_map<std::string, std::string> functions;
+
+    // Get the address of the symbol within the library using nm
+    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
+    FILE *symbol_address_command = popen(command, "r");
+    if (symbol_address_command == NULL) {
+        perror("popen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse the output of nm command to get the symbol address
+    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL &&
+           !std::feof(symbol_address_command)) {
+        char address[32]{};
+        char symbol_location[256]{};
+        char symbol_name[512]{};
+        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
+        std::cout << "Address of symbol " << symbol_name << " in " << path
+                  << ": " << address << std::endl;
+        vars.push_back({.name = symbol_name,
+                        .mangledName = symbol_name,
+                        .kind = "FunctionDecl"});
+    }
+
+    pclose(symbol_address_command);
+
+    auto filename = "lib_" + std::filesystem::path(path).filename().string();
+
+    prepareFunctionWrapper(filename, vars, functions);
+
+    void *handlewp = nullptr;
+
+    if (!functions.empty()) {
+        handlewp = dlopen(("./libwrapper_" + filename + ".so").c_str(),
+                          RTLD_NOW | RTLD_GLOBAL);
+
+        if (!handlewp) {
+            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            // return false;
+        }
+    }
+
+    int dlOpenFlags = RTLD_NOW | RTLD_GLOBAL;
+
+    std::string library = path;
+
+    if (filename.ends_with(".a") || filename.ends_with(".o")) {
+        // g++  -Wl,--whole-archive base64.cc.o -Wl,--no-whole-archive -shared
+        // -o teste.o
+        library = "./" + filename + ".so";
+        std::string cmd = "g++ -Wl,--whole-archive " + path +
+                          " -Wl,--no-whole-archive -shared -o " + library;
+        std::cout << cmd << std::endl;
+        system(cmd.c_str());
+    }
+
+    auto load_start = std::chrono::steady_clock::now();
+
+    lastLibrary = library;
+
+    if (!functions.empty()) {
+        char command[1024]{};
+        sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
+        FILE *symbol_address_command = popen(command, "r");
+        if (symbol_address_command == NULL) {
+            perror("popen");
+            exit(EXIT_FAILURE);
+        }
+
+        char line[1024]{};
+
+        while (fgets(line, 1024, symbol_address_command) != NULL) {
+            uintptr_t symbol_offset = 0;
+            char symbol_name[256];
+            sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
+
+            if (functions.contains(symbol_name)) {
+                symbolsToResolve[symbol_name] = symbol_offset;
+            }
+        }
+
+        pclose(symbol_address_command);
+    }
+
+    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    if (!handle) {
+        std::cerr << __FILE__ << ":" << __LINE__
+                  << " Cannot open library: " << dlerror() << '\n';
+        return false;
+    }
+
+    symbolsToResolve.clear();
+
+    auto load_end = std::chrono::steady_clock::now();
+
+    std::cout << "load time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(
+                     load_end - load_start)
+                     .count()
+              << "us" << std::endl;
+
+    fillWrapperPtrs(functions, handlewp, handle);
+
+    return true;
+}
+
 auto compileAndRunCode(CompilerCodeCfg &&cfg) {
     std::vector<VarDecl> vars;
     int returnCode = 0;
@@ -1551,6 +1661,13 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         line = line.substr(5);
 
         linkLibraries.insert(line);
+        return true;
+    }
+
+    if (line.starts_with("#loadprebuilt ")) {
+        line = line.substr(14);
+
+        loadPrebuilt(line);
         return true;
     }
 
