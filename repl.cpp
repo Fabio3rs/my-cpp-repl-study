@@ -952,12 +952,6 @@ auto get_library_start_address(const char *library_name) -> uintptr_t {
         line[strcspn(line.data(), "\n")] = 0;
         std::cout << strlen(line.c_str()) << "   \"" << line << '"'
                   << std::endl;
-        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
-                  << std::endl;
-        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
-                  << std::endl;
-        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
-                  << std::endl;
         try {
             sscanf(line.c_str(), "%zx-%zx %*s %*s %*s %*s %1023s",
                    &start_address, &end_address, library_path.data());
@@ -1460,8 +1454,6 @@ bool loadPrebuilt(const std::string &path) {
         char symbol_location[256]{};
         char symbol_name[512]{};
         sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
-        std::cout << "Address of symbol " << symbol_name << " in " << path
-                  << ": " << address << std::endl;
         vars.push_back({.name = symbol_name,
                         .mangledName = symbol_name,
                         .kind = "FunctionDecl"});
