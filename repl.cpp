@@ -720,7 +720,7 @@ auto analyzeCustomCommands(
     std::pair<std::vector<VarDecl>, int> resultc;
 
     std::for_each(
-        std::execution::par, commands.begin(), commands.end(),
+        std::execution::par_unseq, commands.begin(), commands.end(),
         [&](const auto &namecmd) {
             if (namecmd.first.empty()) {
                 return;
@@ -802,7 +802,8 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
     std::mutex namesConcatedMutex;
 
     std::for_each(
-        std::execution::par, names.begin(), names.end(), [&](const auto &name) {
+        std::execution::par_unseq, names.begin(), names.end(),
+        [&](const auto &name) {
             if (name.empty()) {
                 return;
             }
@@ -1234,8 +1235,9 @@ void prepareFunctionWrapper(
     }
 }
 
-void fillWrapperPtrs(std::unordered_map<std::string, std::string> &functions,
-                     void *handlewp, void *handle) {
+void fillWrapperPtrs(
+    const std::unordered_map<std::string, std::string> &functions,
+    void *handlewp, void *handle) {
     for (const auto &[mangledName, fns] : functions) {
         void *fnptr = dlsym(handle, mangledName.c_str());
         if (!fnptr) {
@@ -1298,6 +1300,64 @@ void evalEverything() {
     lazyEvalFns.clear();
 }
 
+void resolveSymbolOffsetsFromLibraryFile(
+    const std::unordered_map<std::string, std::string> &functions) {
+    if (functions.empty()) {
+        return;
+    }
+
+    char command[1024]{};
+    sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
+    FILE *symbol_address_command = popen(command, "r");
+    if (symbol_address_command == NULL) {
+        perror("popen");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[1024]{};
+
+    while (fgets(line, 1024, symbol_address_command) != NULL) {
+        uintptr_t symbol_offset = 0;
+        char symbol_name[256];
+        sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
+
+        if (functions.contains(symbol_name)) {
+            symbolsToResolve[symbol_name] = symbol_offset;
+        }
+    }
+
+    pclose(symbol_address_command);
+}
+
+auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
+    std::vector<VarDecl> vars;
+    char command[2048]{}, line[MAX_LINE_LENGTH]{};
+
+    // Get the address of the symbol within the library using nm
+    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
+    FILE *symbol_address_command = popen(command, "r");
+    if (symbol_address_command == NULL) {
+        perror("popen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse the output of nm command to get the symbol address
+    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL &&
+           !std::feof(symbol_address_command)) {
+        char address[32]{};
+        char symbol_location[256]{};
+        char symbol_name[512]{};
+        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
+        vars.push_back({.name = symbol_name,
+                        .mangledName = symbol_name,
+                        .kind = "FunctionDecl"});
+    }
+
+    pclose(symbol_address_command);
+
+    return vars;
+}
+
 auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                                  std::vector<VarDecl> &&vars) {
     std::unordered_map<std::string, std::string> functions;
@@ -1327,29 +1387,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     lastLibrary = ("./lib" + cfg.repl_name + ".so");
 
-    if (!functions.empty()) {
-        char command[1024]{};
-        sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
-        FILE *symbol_address_command = popen(command, "r");
-        if (symbol_address_command == NULL) {
-            perror("popen");
-            exit(EXIT_FAILURE);
-        }
-
-        char line[1024]{};
-
-        while (fgets(line, 1024, symbol_address_command) != NULL) {
-            uintptr_t symbol_offset = 0;
-            char symbol_name[256];
-            sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
-
-            if (functions.contains(symbol_name)) {
-                symbolsToResolve[symbol_name] = symbol_offset;
-            }
-        }
-
-        pclose(symbol_address_command);
-    }
+    resolveSymbolOffsetsFromLibraryFile(functions);
 
     void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
     if (!handle) {
@@ -1434,32 +1472,9 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 }
 
 bool loadPrebuilt(const std::string &path) {
-    char command[2048]{}, line[MAX_LINE_LENGTH]{};
-
-    std::vector<VarDecl> vars;
     std::unordered_map<std::string, std::string> functions;
 
-    // Get the address of the symbol within the library using nm
-    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parse the output of nm command to get the symbol address
-    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL &&
-           !std::feof(symbol_address_command)) {
-        char address[32]{};
-        char symbol_location[256]{};
-        char symbol_name[512]{};
-        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
-        vars.push_back({.name = symbol_name,
-                        .mangledName = symbol_name,
-                        .kind = "FunctionDecl"});
-    }
-
-    pclose(symbol_address_command);
+    std::vector<VarDecl> vars = getBuiltFileDecls(path);
 
     auto filename = "lib_" + std::filesystem::path(path).filename().string();
 
@@ -1495,29 +1510,7 @@ bool loadPrebuilt(const std::string &path) {
 
     lastLibrary = library;
 
-    if (!functions.empty()) {
-        char command[1024]{};
-        sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
-        FILE *symbol_address_command = popen(command, "r");
-        if (symbol_address_command == NULL) {
-            perror("popen");
-            exit(EXIT_FAILURE);
-        }
-
-        char line[1024]{};
-
-        while (fgets(line, 1024, symbol_address_command) != NULL) {
-            uintptr_t symbol_offset = 0;
-            char symbol_name[256];
-            sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
-
-            if (functions.contains(symbol_name)) {
-                symbolsToResolve[symbol_name] = symbol_offset;
-            }
-        }
-
-        pclose(symbol_address_command);
-    }
+    resolveSymbolOffsetsFromLibraryFile(functions);
 
     void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
     if (!handle) {
@@ -1565,6 +1558,21 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
     }
 
     auto end = std::chrono::steady_clock::now();
+
+    {
+        auto vars2 = getBuiltFileDecls("./lib" + cfg.repl_name + ".so");
+
+        // add only if it does not exist
+        for (const auto &var : vars2) {
+            if (std::find_if(vars.begin(), vars.end(),
+                             [&](const VarDecl &varInst) {
+                                 return varInst.mangledName == var.mangledName;
+                             }) == vars.end()) {
+                std::cout << __FILE__ << ":" << __LINE__ << " added: " << var.name << std::endl;
+                vars.push_back(var);
+            }
+        }
+    }
 
     std::cout << "build time: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end -
@@ -1879,6 +1887,8 @@ void repl() {
         perror("Failed to write history");
     }
 }
+
+int ext_build_precompiledheader() { return build_precompiledheader(); }
 
 void initRepl() {
     writeHeaderPrintOverloads();

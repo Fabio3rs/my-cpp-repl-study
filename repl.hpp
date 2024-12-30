@@ -54,3 +54,5 @@ auto compileAndRunCodeCustom(
 void addIncludeDirectory(const std::string &dir);
 
 std::any getResultRepl(std::string cmd);
+
+int ext_build_precompiledheader();
