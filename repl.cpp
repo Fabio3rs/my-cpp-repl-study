@@ -31,12 +31,15 @@
 #include <thread>
 #include <tuple>
 #include <unistd.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 std::unordered_set<std::string> linkLibraries;
 std::unordered_set<std::string> includeDirectories;
 std::unordered_set<std::string> preprocessorDefinitions;
+
+std::unordered_map<std::string, EvalResult> evalResults;
 
 void addIncludeDirectory(const std::string &dir) {
     includeDirectories.insert(dir);
@@ -1361,7 +1364,7 @@ auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
 }
 
 auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
-                                 std::vector<VarDecl> &&vars) {
+                                 std::vector<VarDecl> &&vars) -> EvalResult {
     std::unordered_map<std::string, std::string> functions;
 
     prepareFunctionWrapper(cfg.repl_name, vars, functions);
@@ -1391,11 +1394,16 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
+    EvalResult result;
+    result.libpath = lastLibrary;
+
     void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    result.handle = handle;
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
                   << " Cannot open library: " << dlerror() << '\n';
-        return false;
+        result.success = false;
+        return result;
     }
 
     symbolsToResolve.clear();
@@ -1479,13 +1487,19 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
         return true;
     };
 
+    if (auto execPtr = (void (*)())dlsym(handle, "_Z4execv");
+        execPtr != nullptr) {
+        result.exec = execPtr;
+    }
+
     if (cfg.lazyEval) {
         lazyEvalFns.push_back(eval);
     } else {
         eval();
     }
 
-    return true;
+    result.success = true;
+    return result;
 }
 
 bool loadPrebuilt(const std::string &path) {
@@ -1551,7 +1565,7 @@ bool loadPrebuilt(const std::string &path) {
     return true;
 }
 
-auto compileAndRunCode(CompilerCodeCfg &&cfg) {
+auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     std::vector<VarDecl> vars;
     int returnCode = 0;
 
@@ -1571,7 +1585,7 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
     }
 
     if (returnCode != 0) {
-        return false;
+        return {};
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -1797,6 +1811,43 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         cfg.analyze = false;
     }
 
+    if (auto rerun = evalResults.find(line); rerun != evalResults.end()) {
+        try {
+            if (rerun->second.exec) {
+                std::cout << "Rerunning compiled command" << std::endl;
+                rerun->second.exec();
+                return true;
+            }
+        } catch (const segvcatch::hardware_exception &e) {
+            std::cerr << "Hardware exception: " << e.what() << std::endl;
+            std::cerr << assembly_info::getInstructionAndSource(
+                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
+                      << std::endl;
+            auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
+
+            if (btrace != nullptr && size > 0) {
+                std::cerr << "Backtrace: " << std::endl;
+                backtrace_symbols_fd(btrace, size, 2);
+            } else {
+                std::cerr << "Backtrace not available" << std::endl;
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "C++ exception on exec/eval: " << e.what()
+                      << std::endl;
+
+            auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
+
+            if (btrace != nullptr && size > 0) {
+                std::cerr << "Backtrace: " << std::endl;
+                backtrace_symbols_fd(btrace, size, 2);
+            } else {
+                std::cerr << "Backtrace not available" << std::endl;
+            }
+        } catch (...) {
+            std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+        }
+    }
+
     // std::cout << line << std::endl;
 
     cfg.repl_name = "repl_" + std::to_string(i++);
@@ -1826,7 +1877,11 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         }
     }
 
-    compileAndRunCode(std::move(cfg));
+    auto evalRes = compileAndRunCode(std::move(cfg));
+
+    if (evalRes.success) {
+        evalResults.insert_or_assign(line, evalRes);
+    }
 
     return true;
 }
@@ -1838,13 +1893,13 @@ int64_t replCounter = 0;
 
 auto compileAndRunCodeCustom(
     const std::unordered_map<std::string, std::string> &commands,
-    const std::vector<std::string> &objects) -> bool {
+    const std::vector<std::string> &objects) -> EvalResult {
     auto now = std::chrono::steady_clock::now();
 
     auto [vars, returnCode] = analyzeCustomCommands(commands);
 
     if (returnCode != 0) {
-        return false;
+        return {};
     }
 
     CompilerCodeCfg cfg;
@@ -1853,7 +1908,7 @@ auto compileAndRunCodeCustom(
     returnCode = linkAllObjects(objects, cfg.repl_name);
 
     if (returnCode != 0) {
-        return false;
+        return {};
     }
 
     mergeVars(vars);
