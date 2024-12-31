@@ -23,6 +23,8 @@ find_package(TBB REQUIRED)
 
 pkg_check_modules(READLINE REQUIRED readline)
 
+include_directories(SYSTEM ${TBB_INCLUDE_DIRS})
+
 option(ENABLE_NOTIFICATIONS "Enable desktop notifications" ON)
 
 # export commands
@@ -41,7 +43,7 @@ endif()
 
 add_executable(cpprepl main.cpp)
 target_precompile_headers(cpprepl PUBLIC stdafx.hpp)
-target_link_libraries(cpprepl cpprepl_lib segvcatch)
+target_link_libraries(cpprepl cpprepl_lib tbb segvcatch)
 
 #add_executable(libclangtest libclangtest.cpp)
 #target_include_directories(libclangtest PRIVATE /usr/lib/llvm-15/include)

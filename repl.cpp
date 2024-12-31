@@ -5,6 +5,7 @@
 
 #include "repl.hpp"
 #include "simdjson.h"
+#include "utility/assembly_info.hpp"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -14,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <exceptdefs.h>
 #include <execinfo.h>
 #include <execution>
 #include <filesystem>
@@ -1568,7 +1570,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) {
                              [&](const VarDecl &varInst) {
                                  return varInst.mangledName == var.mangledName;
                              }) == vars.end()) {
-                std::cout << __FILE__ << ":" << __LINE__ << " added: " << var.name << std::endl;
+                std::cout << __FILE__ << ":" << __LINE__
+                          << " added: " << var.name << std::endl;
                 vars.push_back(var);
             }
         }
@@ -1874,8 +1877,22 @@ void repl() {
         free(input);
         add_history(line.c_str());
 
-        if (!extExecRepl(line)) {
-            break;
+        try {
+            if (!extExecRepl(line)) {
+                break;
+            }
+        } catch (const segvcatch::segmentation_fault &e) {
+            std::cerr << "Segmentation fault: " << e.what() << std::endl;
+            std::cerr << assembly_info::getInstructionAndSource(
+                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
+                      << std::endl;
+        } catch (const segvcatch::floating_point_error &e) {
+            std::cerr << "Floating point error: " << e.what() << std::endl;
+            std::cerr << assembly_info::getInstructionAndSource(
+                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
+                      << std::endl;
+        } catch (const std::exception &e) {
+            std::cerr << "C++ Exception: " << e.what() << std::endl;
         }
 
         if (bootstrapProgram) {
