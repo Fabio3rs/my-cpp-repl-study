@@ -1419,6 +1419,21 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
             auto exec_start = std::chrono::steady_clock::now();
             try {
                 execv();
+            } catch (const segvcatch::hardware_exception &e) {
+                std::cerr << "Hardware exception: " << e.what() << std::endl;
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+                auto [btrace, size] =
+                    backtraced_exceptions::get_backtrace_for(e);
+
+                if (btrace != nullptr && size > 0) {
+                    std::cerr << "Backtrace: " << std::endl;
+                    backtrace_symbols_fd(btrace, size, 2);
+                } else {
+                    std::cerr << "Backtrace not available" << std::endl;
+                }
             } catch (const std::exception &e) {
                 std::cerr << "C++ exception on exec/eval: " << e.what()
                           << std::endl;

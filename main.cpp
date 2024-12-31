@@ -16,13 +16,13 @@ using namespace std;
 
 void handle_segv(const segvcatch::hardware_exception_info &info) {
     throw segvcatch::segmentation_fault(
-        "My SEGV at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        "SEGV at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
         info);
 }
 
 void handle_fpe(const segvcatch::hardware_exception_info &info) {
     throw segvcatch::floating_point_error(
-        "My FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        "FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
         info);
 }
 
