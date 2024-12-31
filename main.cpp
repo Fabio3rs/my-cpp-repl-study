@@ -1,6 +1,7 @@
 #include "stdafx.hpp"
 
 #include "repl.hpp"
+#include "utility/assembly_info.hpp"
 #include <cstdint>
 #include <exceptdefs.h>
 #include <execinfo.h>
@@ -14,14 +15,15 @@
 using namespace std;
 
 void handle_segv(const segvcatch::hardware_exception_info &info) {
-    throw std::runtime_error(
-        "My SEGV at: " +
-        std::to_string(reinterpret_cast<uintptr_t>(info.addr)));
+    throw segvcatch::segmentation_fault(
+        "My SEGV at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        info);
 }
 
 void handle_fpe(const segvcatch::hardware_exception_info &info) {
-    throw std::runtime_error(
-        "My FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)));
+    throw segvcatch::floating_point_error(
+        "My FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        info);
 }
 
 void segfaultHandler(int sig) {
@@ -125,15 +127,20 @@ void segfaultHandler(int sig) {
 }
 
 int main(int argc, char **argv) {
-    segvcatch::init_segv(&handle_segv);
-    segvcatch::init_fpe(&handle_fpe);
+    // segvcatch::init_segv(&handle_segv);
+    // segvcatch::init_fpe(&handle_fpe);
 
     initNotifications("cpprepl");
     initRepl();
 
     int c;
-    while ((c = getopt(argc, argv, "r:")) != -1) {
+    while ((c = getopt(argc, argv, "sr:")) != -1) {
         switch (c) {
+        case 's': {
+            printf("Setting signal handlers\n");
+            segvcatch::init_segv(&handle_segv);
+            segvcatch::init_fpe(&handle_fpe);
+        } break;
         case 'r': {
             std::string_view replCmdsFile(optarg);
 
@@ -145,10 +152,20 @@ int main(int argc, char **argv) {
             }
 
             std::string line;
-            while (std::getline(file, line)) {
-                if (!extExecRepl(line)) {
-                    break;
+            try {
+                while (std::getline(file, line)) {
+                    if (!extExecRepl(line)) {
+                        break;
+                    }
                 }
+            } catch (const segvcatch::hardware_exception &e) {
+                std::cerr << "Segmentation fault: " << e.what() << std::endl;
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+            } catch (const std::exception &e) {
+                std::cerr << "C++ Exception: " << e.what() << std::endl;
             }
         } break;
         }
