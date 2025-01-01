@@ -6,6 +6,7 @@
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
+#include "utility/quote.hpp"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
