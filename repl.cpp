@@ -1059,7 +1059,7 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
      * Function related to loadFn_"funcion name", this function is called when
      * the library constructor tries to run and the function is not loaded yet.
      */
-    std::cout << "Function segfaulted: " << name
+    std::cout << __LINE__ << ": Function segfaulted: " << name
               << "   library: " << lastLibrary << std::endl;
 
     /*
@@ -1068,6 +1068,38 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
     auto base = get_library_start_address(lastLibrary.c_str());
 
     if (base == 0) {
+        std::cerr << __LINE__ << ": base == 0" << lastLibrary << std::endl;
+
+        auto handle = dlopen(lastLibrary.c_str(), RTLD_NOLOAD);
+
+        if (handle == nullptr) {
+            std::cerr << __LINE__ << ": handle == nullptr" << lastLibrary
+                      << std::endl;
+            return;
+        }
+
+        for (const auto &[symbol, offset] : symbolsToResolve) {
+            void **wrap_ptrfn =
+                (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
+
+            if (wrap_ptrfn == nullptr) {
+                continue;
+            }
+
+            auto tmp = dlsym(handle, symbol.c_str());
+
+            if (tmp == nullptr) {
+                std::cerr << __LINE__ << ": tmp == nullptr" << lastLibrary
+                          << std::endl;
+                continue;
+            }
+
+            *wrap_ptrfn = tmp;
+        }
+
+        if (*ptr == nullptr) {
+            *ptr = dlsym(handle, name);
+        }
         return;
     }
 
