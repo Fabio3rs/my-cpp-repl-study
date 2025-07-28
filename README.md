@@ -173,7 +173,8 @@ A sophisticated AST analysis system extracts symbol information while addressing
 Unlike conventional REPL behavior that permits code and declarations in any sequence, C++ global scope execution presents unique challenges:
 
 - **Function Execution Problem**: Invoking functions within global scope without variable assignment proved cumbersome
-- **#eval Command Innovation**: Introduced to internally encapsulate C++ code within functions for evaluation
+- **Direct Declarations Support**: Global variable and function declarations work directly without special commands
+- **#eval Command Innovation**: Introduced specifically for expressions that need to be executed (not for declarations)
 - **File Integration**: Extended `#eval` to accept filenames, incorporating file contents for compilation
 - **Automatic Function Invocation**: If compiled code contains a function named `_Z4execv`, it's automatically executed
 
@@ -247,7 +248,7 @@ Advanced memory management and variable tracking:
 
 The system provides several sophisticated commands:
 
-- **#eval**: Wraps code in functions for execution
+- **#eval**: Wraps expressions in functions for execution (not needed for declarations)
 - **#return**: Evaluates expressions and prints results automatically
 - **#includedir**: Adds include directories
 - **#compilerdefine**: Adds preprocessor definitions
@@ -396,7 +397,7 @@ Run commands from file:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `#eval <code>` | Execute C++ code | `#eval int x = 42;` |
+| `#eval <code>` | Execute C++ expressions (not declarations) | `#eval std::cout << "Hello\n";` |
 | `#eval <file>` | Compile and execute file | `#eval mycode.cpp` |
 | `#return <expr>` | Evaluate and print expression | `#return x + 10` |
 | `#includedir <path>` | Add include directory | `#includedir /usr/local/include` |
@@ -412,11 +413,11 @@ Run commands from file:
 ### Example Session
 
 ```cpp
->>> #eval int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }
+>>> int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }
 >>> #return factorial(5)
 Type name: int value: 120
 
->>> #eval std::vector<int> numbers = {1, 2, 3, 4, 5};
+>>> std::vector<int> numbers = {1, 2, 3, 4, 5};
 >>> numbers
 std::vector<int> numbers = [1, 2, 3, 4, 5]
 
