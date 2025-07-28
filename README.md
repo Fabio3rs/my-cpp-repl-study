@@ -153,9 +153,10 @@ The system employs a **compile-then-link** approach rather than interpretation:
 
 Example compilation command:
 ```cpp
-auto cmd = "clang++ -std=c++20 -fPIC -Xclang -ast-dump=json -include "
-           "precompiledheader.hpp -fsyntax-only " + name + ".cpp " + 
-           getLinkLibrariesStr() + " -o lib" + name + ".so > " + name + ".json";
+auto cmd = compiler + " -std=" + std + " -fPIC -Xclang -ast-dump=json " +
+           includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
+           getPreprocessorDefinitionsStr() + " -fsyntax-only " + name + ext +
+           " -o lib" + name + ".so > " + name + ".json";
 ```
 
 ### 4. Abstract Syntax Tree (AST) Analysis and Export
