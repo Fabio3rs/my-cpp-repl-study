@@ -239,10 +239,11 @@ try {
 
 Advanced memory management and variable tracking:
 
-- **Global State Maintenance**: Maintains persistent variable declarations across REPL sessions through decl_amalgama.hpp
+- **Session State Maintenance**: Maintains variable declarations during the current REPL session through decl_amalgama.hpp
 - **Type-Aware Printing**: Generates type-specific printing functions for variable inspection
-- **Cross-Library Variable Access**: Enables access to variables defined in previously loaded libraries
+- **Cross-Library Variable Access**: Enables access to variables defined in previously loaded libraries within the same session
 - **#return Command**: Combines expression evaluation with automatic result printing
+- **Temporary State**: Variable state is not persisted between REPL sessions (future enhancement)
 
 ### 10. Advanced REPL Commands and Features
 
@@ -342,6 +343,7 @@ The project demonstrates practical applications through a self-editing text edit
 2. **Symbol Pollution**: Global symbol namespace can become cluttered with repeated compilations
 3. **Compilation Overhead**: Each evaluation requires full compilation cycle
 4. **Complex Signal Interactions**: Advanced signal handling may interfere with user code signal usage
+5. **Session Persistence**: Variable state is lost when REPL session ends
 
 ## Advanced Assembly and Linking Techniques
 
@@ -502,10 +504,11 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 
 ### Potential Improvements
 1. **Memory Management**: Implement library unloading to reduce memory consumption
-2. **Symbol Versioning**: Add support for function versioning and rollback
-3. **Distributed Execution**: Extend to support remote compilation and execution
-4. **IDE Integration**: Develop plugins for popular development environments
-5. **Language Extensions**: Support for experimental C++ features
+2. **Session Persistence**: Add ability to save and restore variable state between REPL sessions
+3. **Symbol Versioning**: Add support for function versioning and rollback
+4. **Distributed Execution**: Extend to support remote compilation and execution
+5. **IDE Integration**: Develop plugins for popular development environments
+6. **Language Extensions**: Support for experimental C++ features
 
 ### Research Directions
 1. **Incremental Linking**: Optimize linking performance for large codebases
