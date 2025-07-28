@@ -24,6 +24,7 @@ void notifyError(std::string_view summary, std::string_view msg);
 void initRepl();
 void repl();
 bool extExecRepl(std::string_view cmd);
+void installCtrlCHandler();
 
 struct VarDecl {
     std::string name;

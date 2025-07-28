@@ -140,6 +140,7 @@ int main(int argc, char **argv) {
             printf("Setting signal handlers\n");
             segvcatch::init_segv(&handle_segv);
             segvcatch::init_fpe(&handle_fpe);
+            installCtrlCHandler();
         } break;
         case 'r': {
             std::string_view replCmdsFile(optarg);

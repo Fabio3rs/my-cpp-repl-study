@@ -26,6 +26,7 @@
 #include <numeric>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include <segvcatch.h>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -1618,6 +1619,7 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     }
 
     if (returnCode != 0) {
+        shouldRecompilePrecompiledHeader = true;
         return {};
     }
 
@@ -1852,6 +1854,9 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 rerun->second.exec();
                 return true;
             }
+        } catch (const segvcatch::interrupted_by_the_user &e) {
+            std::cerr << "Interrupted by the user: " << e.what() << std::endl;
+            return true;
         } catch (const segvcatch::hardware_exception &e) {
             std::cerr << "Hardware exception: " << e.what() << std::endl;
             std::cerr << assembly_info::getInstructionAndSource(
@@ -1880,6 +1885,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         } catch (...) {
             std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
         }
+
+        return true;
     }
 
     // std::cout << line << std::endl;
@@ -1958,6 +1965,21 @@ auto compileAndRunCodeCustom(
     return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
 }
 
+int ctrlcounter = 0;
+
+void handleCtrlC(const segvcatch::hardware_exception_info &info) {
+    std::cout << "Ctrl-C pressed" << std::endl;
+
+    if (ctrlcounter == 0) {
+        std::cout << "Press Ctrl-C again to exit" << std::endl;
+        ctrlcounter++;
+    }
+
+    throw segvcatch::interrupted_by_the_user("Ctrl-C pressed", info);
+}
+
+void installCtrlCHandler() { segvcatch::init_ctrlc(&handleCtrlC); }
+
 auto extExecRepl(std::string_view lineview) -> bool {
     return execRepl(lineview, replCounter);
 }
@@ -1971,14 +1993,21 @@ void repl() {
     }
 
     while (true) {
-        char *input = readline(">>> ");
+        try {
+            char *input = readline(">>> ");
 
-        if (input == nullptr) {
+            if (input == nullptr) {
+                break;
+            }
+
+            line = input;
+            free(input);
+        } catch (const segvcatch::interrupted_by_the_user &e) {
+            std::cout << "Ctrl-C pressed" << std::endl;
             break;
         }
 
-        line = input;
-        free(input);
+        ctrlcounter = 0;
         add_history(line.c_str());
 
         try {
