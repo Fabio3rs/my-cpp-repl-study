@@ -17,7 +17,15 @@
 
 ## Abstract
 
-This project presents an innovative approach to implementing a C++ Read-Eval-Print Loop (REPL) that differs fundamentally from existing solutions like clang-repl. While traditional C++ REPLs rely on LLVM Intermediate Representation (IR) interpretation, this implementation employs a novel combination of dynamic compilation to shared libraries, runtime linking with symbol resolution, and an advanced signal-to-exception translation system. The project demonstrates sophisticated error handling through hardware signal interception and automatic backtrace generation.
+This project presents an innovative approach to implementing a C++ Read-Eval-Print Loop (REPL) - an interactive programming environment where users can write, test, and execute C++ code line by line, similar to Python's interactive shell. Unlike existing solutions like clang-repl that interpret code through virtual machines, this implementation takes a fundamentally different approach by **compiling each input directly to native machine code** and loading it as a dynamic library.
+
+**Key Innovation**: Instead of interpretation, the system:
+1. **Compiles user input** into real executable code (shared libraries)
+2. **Loads code dynamically** using the operating system's library loading mechanisms
+3. **Handles crashes gracefully** by converting hardware errors (segmentation faults) into manageable C++ exceptions
+4. **Provides instant debugging** with automatic crash analysis and source code correlation
+
+This approach offers **native performance** (no interpretation overhead) while maintaining **interactive safety** through sophisticated error recovery. The system demonstrates advanced techniques in dynamic compilation, runtime linking, assembly-level programming, and hardware exception handling - making it valuable both as a practical development tool and as a research platform for understanding low-level systems programming concepts.
 
 ## Table of Contents
 
@@ -29,7 +37,6 @@ This project presents an innovative approach to implementing a C++ Read-Eval-Pri
 - [Use Cases and Applications](#use-cases-and-applications)
 - [Technical Innovations vs. clang-repl](#technical-innovations-vs-clang-repl)
 - [Safety and Security Considerations](#safety-and-security-considerations)
-- [System Limitations](#system-limitations-and-safety-considerations)
 - [Advanced Assembly and Linking Techniques](#advanced-assembly-and-linking-techniques)
 - [Future Work and Extensions](#future-work-and-extensions)
 - [Contributing](#contributing)
@@ -255,7 +262,7 @@ The system provides several sophisticated commands:
 - **#includedir**: Adds include directories
 - **#compilerdefine**: Adds preprocessor definitions
 - **#lib**: Links additional libraries
-- **#loadprebuilt**: Loads pre-compiled object files
+- **#loadprebuilt**: Loads pre-compiled object files (.a, .o, .so) with automatic wrapper generation
 - **#batch_eval**: Processes multiple files simultaneously
 
 ### 11. Bootstrap Extension Mechanism
@@ -270,6 +277,88 @@ This mechanism enables users to:
 - Assign custom main-like functions to the REPL
 - Transfer control from REPL to user-defined programs
 - Create self-modifying applications
+
+### 12. Pre-built Library Integration (`#loadprebuilt`)
+
+The `#loadprebuilt` command implements sophisticated integration of external compiled libraries into the REPL environment:
+
+#### Symbol Extraction and Analysis
+```cpp
+std::vector<VarDecl> vars = getBuiltFileDecls(path);
+// Executes: nm <file> | grep ' T ' to extract function symbols
+// Creates VarDecl entries for each discovered function
+```
+
+The system uses the `nm` utility to extract all text symbols (functions) from the target library, creating internal representations that enable dynamic linking.
+
+#### Automatic Format Conversion
+```cpp
+if (filename.ends_with(".a") || filename.ends_with(".o")) {
+    std::string cmd = "g++ -Wl,--whole-archive " + path +
+                      " -Wl,--no-whole-archive -shared -o " + library;
+    system(cmd.c_str());
+}
+```
+
+**Static Library Processing**: Automatically converts `.a` and `.o` files to shared libraries:
+- `--whole-archive`: Forces inclusion of ALL symbols, not just referenced ones
+- `--no-whole-archive`: Restores normal linking behavior
+- Ensures all functions become available for dynamic loading
+
+#### Function Wrapper Generation
+```cpp
+prepareFunctionWrapper(filename, vars, functions);
+// Generates naked assembly trampolines for each function
+```
+
+For each discovered function, the system generates assembly-level wrappers:
+```cpp
+// Generated wrapper example:
+extern "C" void *function_name_ptr = nullptr;
+
+void __attribute__((naked)) function_name() {
+    __asm__ __volatile__("jmp *%0" : : "r"(function_name_ptr));
+}
+```
+
+#### Symbol Offset Resolution
+```cpp
+resolveSymbolOffsetsFromLibraryFile(functions);
+// Maps function names to their memory offsets within the library
+```
+
+Uses `nm -D --defined-only <library>` to create a mapping between symbol names and their positions, enabling precise memory address calculation.
+
+#### Dynamic Loading and Linking
+```cpp
+void *handle = dlopen(library.c_str(), RTLD_NOW | RTLD_GLOBAL);
+fillWrapperPtrs(functions, handlewp, handle);
+```
+
+**Final Integration**:
+- Loads the library using `dlopen` with immediate symbol resolution
+- Updates all wrapper function pointers to reference actual library functions
+- Makes functions callable as if they were defined within the REPL session
+
+#### Integration Benefits
+
+1. **Seamless Interface**: External functions appear as native REPL functions
+2. **Hot-Swapping Support**: Maintains ability to replace implementations dynamically
+3. **Performance**: Minimal overhead through naked function trampolines
+4. **Compatibility**: Works with static archives, object files, and shared libraries
+5. **Error Recovery**: Maintains REPL crash safety even with external code
+
+#### Important: Function Declarations Required
+
+**Critical Note**: Loading a library with `#loadprebuilt` makes functions **available for execution**, but to **call them directly** in the REPL, you must still provide their declarations. This can be done in two ways:
+
+**Include Headers**
+```cpp
+>>> #loadprebuilt libmath.a
+>>> #include <cmath>  // Provides declarations for sqrt, sin, cos, etc.
+>>> double result = sqrt(16.0);  // Now callable
+```
+
 
 ## Real-Time Code Editing Application
 
@@ -329,8 +418,6 @@ The project demonstrates practical applications through a self-editing text edit
 - **Educational Settings**: Excellent for learning systems programming concepts
 - **Sandboxed Environments**: Consider containerization for untrusted code
 - **Research Applications**: Valuable for compiler and runtime system research
-
-## System Limitations and Safety Considerations
 
 ### Enhanced Safety Through Signal Handling:
 
@@ -406,7 +493,8 @@ Run commands from file:
 | `#includedir <path>` | Add include directory | `#includedir /usr/local/include` |
 | `#lib <library>` | Link library | `#lib pthread` |
 | `#compilerdefine <def>` | Add preprocessor definition | `#compilerdefine DEBUG=1` |
-| `#loadprebuilt <file>` | Load precompiled object | `#loadprebuilt mylib.a` |
+| `#loadprebuilt <file>` | Load precompiled object/library | `#loadprebuilt mylib.a` |
+| `#loadprebuilt <file>` | Load shared library | `#loadprebuilt mylib.so` |
 | `#batch_eval <files...>` | Compile multiple files | `#batch_eval file1.cpp file2.cpp` |
 | `#lazyeval <code>` | Lazy evaluation (deferred) | `#lazyeval expensive_computation();` |
 | `printall` | Print all variables | `printall` |
