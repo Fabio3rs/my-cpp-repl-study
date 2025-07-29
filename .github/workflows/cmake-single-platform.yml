@@ -24,6 +24,9 @@ jobs:
       with:
         submodules: true
 
+    - name: Apt update
+      run: sudo apt-get update
+
     - name: Install gtest manually
       run: sudo apt-get install libgtest-dev
 
