@@ -20,6 +20,7 @@
 #include <execinfo.h>
 #include <execution>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iterator>
 #include <mutex>
@@ -393,6 +394,11 @@ void analyzeInnerAST(
 int analyzeASTFromJsonString(simdjson::padded_string_view json,
                              const std::string &source,
                              std::vector<VarDecl> &vars) {
+    {
+        std::fstream debugOutput("debug_output.json",
+                                 std::ios::out | std::ios::trunc);
+        debugOutput << json << std::endl;
+    }
     simdjson::ondemand::parser parser;
     simdjson::ondemand::document doc;
     auto error = parser.iterate(json).get(doc);
@@ -1471,8 +1477,11 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                     backtraced_exceptions::get_backtrace_for(e);
 
                 if (btrace != nullptr && size > 0) {
-                    std::cerr << "Backtrace: " << std::endl;
-                    backtrace_symbols_fd(btrace, size, 2);
+                    std::cerr
+                        << "Backtrace (based on callstack return address): "
+                        << std::endl;
+
+                    backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
                     std::cerr << "Backtrace not available" << std::endl;
                 }
@@ -1484,8 +1493,10 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                     backtraced_exceptions::get_backtrace_for(e);
 
                 if (btrace != nullptr && size > 0) {
-                    std::cerr << "Backtrace: " << std::endl;
-                    backtrace_symbols_fd(btrace, size, 2);
+                    std::cerr
+                        << "Backtrace (based on callstack return address): "
+                        << std::endl;
+                    backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
                     std::cerr << "Backtrace not available" << std::endl;
                 }
@@ -1866,7 +1877,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
             if (btrace != nullptr && size > 0) {
                 std::cerr << "Backtrace: " << std::endl;
-                backtrace_symbols_fd(btrace, size, 2);
+
+                backtraced_exceptions::print_backtrace(btrace, size);
             } else {
                 std::cerr << "Backtrace not available" << std::endl;
             }
@@ -1878,7 +1890,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
             if (btrace != nullptr && size > 0) {
                 std::cerr << "Backtrace: " << std::endl;
-                backtrace_symbols_fd(btrace, size, 2);
+
+                backtraced_exceptions::print_backtrace(btrace, size);
             } else {
                 std::cerr << "Backtrace not available" << std::endl;
             }

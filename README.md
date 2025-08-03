@@ -76,6 +76,20 @@ cpprepl/
 - **Function Wrappers**: Assembly-level trampolines for dynamic function replacement
 - **Debugging Tools** (`assembly_info.hpp`): Crash analysis and source correlation
 
+
+## 🧩 Comparison with State of the Art
+
+* In case of any imprecise information, please open an issue or PR to fix it.
+
+| System             | Compilation Model  | Error Handling                    | Hot Reload      | Backtrace Quality       | Open Source | Platform |
+| ------------------ | ------------------ | --------------------------------- | --------------- | ----------------------- | ----------- | -------- |
+| **cpprepl (this)** | Native, shared lib | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | Yes         | Linux    |
+| clang-repl         | LLVM JIT IR        | Managed (JIT abort)               | No              | IR-level                | Yes         | Multi    |
+| cling              | JIT/Interpreter    | Managed (soft error)              | No              | Partial                 | Yes         | Multi    |
+| Visual Studio HR   | Compiler-level     | Patch revert / rollback           | Per instruction | Compiler map            | No          | Windows  |
+| Python REPL        | Bytecode           | Exception-based                   | Per function    | High (source)           | Yes         | Multi    |
+
+
 ## Core Architecture and Techniques
 
 ### 1. Advanced Signal Handling and Exception Translation
@@ -264,6 +278,41 @@ The system provides several sophisticated commands:
 - **#lib**: Links additional libraries
 - **#loadprebuilt**: Loads pre-compiled object files (.a, .o, .so) with automatic wrapper generation
 - **#batch_eval**: Processes multiple files simultaneously
+
+#### Intelligent Command Caching
+
+The system implements automatic caching of compiled commands to avoid redundant compilation:
+
+```cpp
+// Internal cache mechanism
+std::unordered_map<std::string, EvalResult> evalResults;
+
+// When executing identical commands:
+if (auto rerun = evalResults.find(line); rerun != evalResults.end()) {
+    std::cout << "Rerunning compiled command" << std::endl;
+    rerun->second.exec();  // Direct execution, no recompilation
+    return true;
+}
+```
+
+**Cache Behavior**:
+- **First execution**: Compiles and caches the result
+- **Subsequent identical inputs**: Directly executes cached compiled code
+- **Performance impact**: Eliminates ~100-500ms compilation overhead for repeated commands
+- **Memory efficient**: Stores function pointers, not duplicated libraries
+
+**Example demonstrating cache:**
+```cpp
+>>> #return factorial(5)  // First time: compilation + execution
+build time: 120ms
+exec time: 15us
+Type name: int value: 120
+
+>>> #return factorial(5)  // Subsequent times: cached execution only
+Rerunning compiled command
+exec time: 12us
+Type name: int value: 120
+```
 
 ### 11. Bootstrap Extension Mechanism
 
@@ -562,6 +611,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ### Compilation Performance
 - **Cold Start**: Initial compilation ~200-500ms (includes PCH generation)
 - **Warm Execution**: Subsequent compilations ~50-150ms
+- **Cached Commands**: Identical inputs bypass compilation entirely (cached execution ~1-15μs)
 - **Parallel Compilation**: Multi-file processing with `std::execution::par_unseq`
 - **Memory Usage**: ~10-50MB for moderate session complexity
 
@@ -570,6 +620,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 - **No JIT Overhead**: Direct machine code execution without interpretation
 - **Symbol Resolution**: ~1-10μs per function call through wrappers
 - **Memory Layout**: Standard process memory model with shared library segments
+- **Smart Caching**: Automatic detection and reuse of identical command patterns
 
 ## Use Cases and Applications
 
@@ -601,7 +652,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 
 ### Research Directions
 1. **Incremental Linking**: Optimize linking performance for large codebases
-2. **Smart Caching**: Implement intelligent compilation result caching
+2. **Smart Caching**: Implement intelligent compilation result caching beyond simple string matching
 3. **Cross-Platform Support**: Extend to Windows and macOS
 4. **Security Sandboxing**: Add isolation mechanisms for untrusted code
 5. **Performance Profiling**: Integrate real-time performance analysis

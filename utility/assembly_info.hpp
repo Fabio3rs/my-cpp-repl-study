@@ -66,21 +66,42 @@ inline std::string printSourceLine(const std::string &filePath, int lineNumber,
 }
 
 inline std::string analyzeAddress(const std::string &binaryPath,
-                                  uintptr_t address) {
+                                  uintptr_t address, int before, int after,
+                                  bool linefeed = true,
+                                  bool getSourceContent = true,
+                                  bool getInstruction = true) {
     std::ostringstream output;
 
     // Get the instruction using gdb
-    std::ostringstream gdbCommand;
-    gdbCommand << "gdb --batch -ex 'file " << binaryPath << "' "
-               << "-ex 'x/i 0x" << std::hex << address << "' -ex 'quit'";
-    output << "Instruction:\n" << executeCommand(gdbCommand.str()) << "\n";
+    if (getInstruction) {
+        std::ostringstream gdbCommand;
+        gdbCommand << "gdb --batch -ex 'file " << binaryPath << "' "
+                   << "-ex 'x/i 0x" << std::hex << address << "' -ex 'quit'";
+        output << "Instruction:\n" << executeCommand(gdbCommand.str());
+
+        if (linefeed) {
+            output << "\n";
+        } else {
+            output << " ";
+        }
+    }
 
     // Get the source line using addr2line
     std::ostringstream addr2lineCommand;
     addr2lineCommand << "addr2line -e " << binaryPath << " " << std::hex
                      << address;
     std::string sourceFile = executeCommand(addr2lineCommand.str());
-    output << "Source:\n" << sourceFile << "\n";
+    output << "Source:";
+    if (linefeed) {
+        output << "\n";
+    } else {
+        output << " ";
+    }
+    output << sourceFile;
+
+    if (linefeed) {
+        output << "\n";
+    }
 
     size_t colon = sourceFile.find(':');
     std::string file = sourceFile.substr(0, colon);
@@ -88,13 +109,21 @@ inline std::string analyzeAddress(const std::string &binaryPath,
                    ? 0
                    : std::stoi(sourceFile.substr(colon + 1));
 
-    output << printSourceLine(file, line, 5, 5);
-    output << "\n";
+    if (getSourceContent) {
+        output << printSourceLine(file, line, before, after);
 
+        if (linefeed) {
+            output << "\n";
+        }
+    }
     return output.str();
 }
 
-inline std::string getInstructionAndSource(pid_t pid, uintptr_t address) {
+inline std::string getInstructionAndSource(pid_t pid, uintptr_t address,
+                                           int before = 5, int after = 5,
+                                           bool linefeed = true,
+                                           bool getSourceContent = true,
+                                           bool getInstruction = true) {
     std::ostringstream output;
     std::ostringstream mapsPath;
     mapsPath << "/proc/" << pid << "/maps";
@@ -139,9 +168,14 @@ inline std::string getInstructionAndSource(pid_t pid, uintptr_t address) {
 
     uintptr_t offset = address - baseAddress;
     offset += baseOffset;
-    std::cout << "Calculated offset: " << std::hex << offset << std::endl;
+    // std::cout << "Calculated offset: " << std::hex << offset << std::endl;
 
-    output << analyzeAddress(binaryPath, offset) << "\n";
+    output << analyzeAddress(binaryPath, offset, before, after, linefeed,
+                             getSourceContent, getInstruction);
+
+    if (linefeed) {
+        output << "\n";
+    }
 
     return output.str();
 }

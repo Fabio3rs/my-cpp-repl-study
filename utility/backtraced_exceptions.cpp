@@ -2,11 +2,28 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
 #include <exception>
 #include <execinfo.h>
+
+#include "assembly_info.hpp"
+
+static std::string_view trim(const std::string_view str) noexcept {
+    auto is_not_blank = [](unsigned char ch) {
+        return !std::isblank(ch) && ch != '\n' && ch != '\r';
+    };
+
+    auto first = std::find_if(str.begin(), str.end(), is_not_blank);
+    if (first == str.end()) {
+        return {};
+    }
+    auto last = std::find_if(str.rbegin(), str.rend(), is_not_blank).base();
+    return str.substr(std::distance(str.begin(), first),
+                      std::distance(first, last));
+}
 
 static void *(*cxa_allocate_exception_o)(size_t val) = nullptr;
 
@@ -93,6 +110,56 @@ auto backtraced_exceptions::get_backtrace_for(const std::exception &e)
     }
 
     return std::make_pair(static_cast<void *const *>(nullptr), 0);
+}
+
+void backtraced_exceptions::print_backtrace(void *const *btrace, int size,
+                                            bool print_lines) {
+    if (btrace == nullptr || size <= 0) {
+        std::cerr << "No backtrace available" << std::endl;
+        return;
+    }
+
+    class uniqueptr_free {
+      public:
+        // NOLINTNEXTLINE
+        void operator()(void *ptr) {
+            free(ptr); // NOLINT(hicpp-no-malloc)
+        }
+    };
+
+    using bt_syms_t = std::unique_ptr<char *, uniqueptr_free>;
+
+    bt_syms_t bt_syms;
+
+    bt_syms = bt_syms_t(backtrace_symbols(btrace, size));
+
+    auto pid = getpid();
+
+    for (size_t i = 0; i < size; ++i) {
+        const char *symbol = bt_syms.get()[i];
+        std::cerr << symbol;
+
+        if (print_lines) {
+            try {
+                std::string instruction_info =
+                    assembly_info::getInstructionAndSource(
+                        pid, reinterpret_cast<uintptr_t>(btrace[i]), 0, 0,
+                        false, false, false);
+
+                if (instruction_info.empty()) {
+                    std::cerr << " (no instruction info available)";
+                } else {
+                    std::cerr << " " << trim(instruction_info);
+                }
+            } catch (const std::exception & /*e*/) {
+                /*std::cerr << "Error getting instruction info: " << e.what()
+                          << std::endl;*/
+                // Instruction info is not critical, so we can ignore errors
+            }
+        }
+
+        std::cerr << std::endl;
+    }
 }
 
 namespace {
