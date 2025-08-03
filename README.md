@@ -468,6 +468,12 @@ The project demonstrates practical applications through a self-editing text edit
 - **Sandboxed Environments**: Consider containerization for untrusted code
 - **Research Applications**: Valuable for compiler and runtime system research
 
+### Limitations and Responsible Usage
+
+* No sandboxing: Do not use with untrusted code.
+* Not designed for production deployment (research/educational only).
+* Memory for all loaded libraries remains allocated (see “Future Work”).
+
 ### Enhanced Safety Through Signal Handling:
 
 1. **Controlled Crash Recovery**: Signal-to-exception conversion prevents REPL termination from user code crashes

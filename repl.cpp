@@ -171,6 +171,9 @@ void analyzeInnerAST(
 
     auto inner_array = inner.get_array();
 
+    int64_t lastLine = 0;
+    int64_t lastColumn = 0;
+
     for (auto element : inner_array) {
         auto loc = element["loc"];
 
@@ -237,28 +240,42 @@ void analyzeInnerAST(
             }
         }
 
+        try {
+            lastColumn = loc["col"].value();
+        } catch (...) {
+            lastColumn = 0; // Default to 0 if column is not available
+        }
+
         auto lline = loc["line"];
 
         if (lline.error()) {
             auto spellingLoc = loc["spellingLoc"];
 
             if (spellingLoc.error()) {
-                continue;
+                if (lastLine <= 0) {
+                    continue; // Skip if no valid line information
+                }
+            } else {
+                lline = spellingLoc["line"];
+
+                if (lline.error()) {
+                    continue;
+                }
+
+                loc = spellingLoc;
             }
-
-            lline = spellingLoc["line"];
-
-            if (lline.error()) {
-                continue;
-            }
-
-            loc = spellingLoc;
         }
 
         auto lline_int = lline.get_int64();
 
         if (lline_int.error()) {
-            continue;
+            if (lastLine <= 0) {
+                continue; // Skip if no valid line information
+            }
+
+            // Keep the last line if parsing fails
+        } else {
+            lastLine = lline_int.value();
         }
 
         auto kind = element["kind"];
@@ -354,14 +371,14 @@ void analyzeInnerAST(
             var.qualType = qualType_string.value();
             var.kind = kind_string.value();
             var.file = lastfile;
-            var.line = lline_int.value();
+            var.line = lastLine;
             var.mangledName = mangledName.get_string().value();
 
             vars.push_back(std::move(var));
         } else if (kind_string.value() == "VarDecl") {
             std::scoped_lock<std::mutex> lck(varsWriteMutex);
-            outputHeader += "#line " + std::to_string(lline_int.value()) +
-                            " \"" + lastfile.string() + "\"\n";
+            outputHeader += "#line " + std::to_string(lastLine) + " \"" +
+                            lastfile.string() + "\"\n";
 
             std::string typenamestr = std::string(qualType_string.value());
 
@@ -384,7 +401,7 @@ void analyzeInnerAST(
             var.qualType = qualType_string.value();
             var.kind = kind_string.value();
             var.file = lastfile;
-            var.line = lline_int.value();
+            var.line = lastLine;
 
             vars.push_back(std::move(var));
         }
