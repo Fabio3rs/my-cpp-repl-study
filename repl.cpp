@@ -38,13 +38,10 @@
 #include <unordered_set>
 #include <utility>
 
-struct BuildSettings {
-    std::unordered_set<std::string> linkLibraries;
-    std::unordered_set<std::string> includeDirectories;
-    std::unordered_set<std::string> preprocessorDefinitions;
-};
-
 static BuildSettings buildSettings;
+static ReplState replState;
+
+std::any lastReplResult; // used for external commands
 
 // Forward declaration for command handler usage
 bool loadPrebuilt(const std::string &path);
@@ -128,9 +125,7 @@ bool handleReplCommand(std::string_view line, BuildSettings &bs, bool &useCpp2) 
 
 } // namespace
 
-std::unordered_map<std::string, EvalResult> evalResults;
-
-void addIncludeDirectory(const std::string &dir) { buildSettings.includeDirectories.insert(dir); }
+// moved into replState
 
 auto getLinkLibraries() -> std::unordered_set<std::string> {
     std::unordered_set<std::string> linkLibraries;
@@ -147,36 +142,18 @@ auto getLinkLibraries() -> std::unordered_set<std::string> {
     return linkLibraries;
 }
 
+void addIncludeDirectory(const std::string &dir) { buildSettings.includeDirectories.insert(dir); }
+
 auto getLinkLibrariesStr() -> std::string {
-    std::string linkLibrariesStr;
-
-    linkLibrariesStr += " -L./ ";
-
-    for (const auto &lib : buildSettings.linkLibraries) {
-        linkLibrariesStr += " -l" + lib;
-    }
-
-    return linkLibrariesStr;
+    return buildSettings.getLinkLibrariesStr();
 }
 
 auto getIncludeDirectoriesStr() -> std::string {
-    std::string includeDirectoriesStr;
-
-    for (const auto &dir : buildSettings.includeDirectories) {
-        includeDirectoriesStr += " -I" + dir;
-    }
-
-    return includeDirectoriesStr;
+    return buildSettings.getIncludeDirectoriesStr();
 }
 
 auto getPreprocessorDefinitionsStr() -> std::string {
-    std::string preprocessorDefinitionsStr;
-
-    for (const auto &def : buildSettings.preprocessorDefinitions) {
-        preprocessorDefinitionsStr += " -D" + def;
-    }
-
-    return preprocessorDefinitionsStr;
+    return buildSettings.getPreprocessorDefinitionsStr();
 }
 
 int onlyBuildLib(std::string compiler, const std::string &name,
@@ -629,7 +606,7 @@ int build_precompiledheader(std::string compiler = "clang++") {
     return system(cmd.c_str());
 }
 
-std::unordered_map<std::string, void (*)()> varPrinterAddresses;
+// moved into replState
 
 void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     if (vars.empty()) {
@@ -697,7 +674,7 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
                 return;
             }
 
-            varPrinterAddresses[var.name] = printvar;
+            replState.varPrinterAddresses[var.name] = printvar;
         }
     }
 }
@@ -735,9 +712,9 @@ struct wrapperFn {
     void **wrap_ptrfn;
 };
 
-std::unordered_set<std::string> varsNames;
+// moved into replState
 std::unordered_map<std::string, wrapperFn> fnNames;
-std::vector<VarDecl> allTheVariables;
+// moved into replState
 
 auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
     -> std::vector<VarDecl> {
@@ -779,9 +756,9 @@ auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
 
     // merge todasVars with vars
     for (const auto &var : vars) {
-        if (varsNames.find(var.name) == varsNames.end()) {
-            varsNames.insert(var.name);
-            allTheVariables.push_back(var);
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
         }
     }
 
@@ -821,9 +798,9 @@ void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
 
 void mergeVars(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
-        if (varsNames.find(var.name) == varsNames.end()) {
-            varsNames.insert(var.name);
-            allTheVariables.push_back(var);
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
         }
     }
 }
@@ -1095,7 +1072,7 @@ auto get_symbol_address(const char *library_name, const char *symbol_name)
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
     uintptr_t start_address{}, end_address{};
-    char command[MAX_LINE_LENGTH]{};
+    char command[MAX_LINE_LENGTH*2]{};
     uintptr_t symbol_offset = 0;
 
     // Open /proc/self/maps
@@ -1434,16 +1411,14 @@ void fillWrapperPtrs(
     }
 }
 
-std::any lastReplResult;
-std::vector<std::function<bool()>> lazyEvalFns;
-bool shouldRecompilePrecompiledHeader = false;
+// moved into replState
 
 void evalEverything() {
-    for (const auto &fn : lazyEvalFns) {
+    for (const auto &fn : replState.lazyEvalFns) {
         fn();
     }
 
-    lazyEvalFns.clear();
+    replState.lazyEvalFns.clear();
 }
 
 void resolveSymbolOffsetsFromLibraryFile(
@@ -1619,9 +1594,9 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                 continue;
             }
 
-            auto it = varPrinterAddresses.find(var.name);
+            auto it = replState.varPrinterAddresses.find(var.name);
 
-            if (it != varPrinterAddresses.end()) {
+            if (it != replState.varPrinterAddresses.end()) {
                 it->second();
             } else {
                 std::cout << "not found: " << var.name << std::endl;
@@ -1639,7 +1614,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     }
 
     if (cfg.lazyEval) {
-        lazyEvalFns.push_back(eval);
+        replState.lazyEvalFns.push_back(eval);
     } else {
         eval();
     }
@@ -1731,7 +1706,7 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     }
 
     if (returnCode != 0) {
-        shouldRecompilePrecompiledHeader = true;
+        replState.shouldRecompilePrecompiledHeader = true;
         return {};
     }
 
@@ -1762,7 +1737,7 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
 }
 
-bool useCpp2 = false;
+// moved into replState
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     std::string line(lineview);
@@ -1770,7 +1745,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return false;
     }
 
-    if (handleReplCommand(line, buildSettings, useCpp2)) {
+    if (handleReplCommand(line, buildSettings, replState.useCpp2)) {
         return true;
     }
 
@@ -1794,7 +1769,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
-                    shouldRecompilePrecompiledHeader =
+                    replState.shouldRecompilePrecompiledHeader =
                         includedFiles.insert(path).second;
                 }
             } else {
@@ -1808,15 +1783,15 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
-    if (shouldRecompilePrecompiledHeader) {
+    if (replState.shouldRecompilePrecompiledHeader) {
         build_precompiledheader();
-        shouldRecompilePrecompiledHeader = false;
+        replState.shouldRecompilePrecompiledHeader = false;
     }
 
     if (line == "printall") {
         std::cout << "printall" << std::endl;
 
-        savePrintAllVarsLibrary(allTheVariables);
+        savePrintAllVarsLibrary(replState.allTheVariables);
         runPrintAll();
         return true;
     }
@@ -1828,10 +1803,10 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
     // command parsing handled above
 
-    if (varsNames.contains(line)) {
-        auto it = varPrinterAddresses.find(line);
+    if (replState.varsNames.contains(line)) {
+        auto it = replState.varPrinterAddresses.find(line);
 
-        if (it != varPrinterAddresses.end()) {
+        if (it != replState.varPrinterAddresses.end()) {
             it->second();
             return true;
         } else {
@@ -1863,7 +1838,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     CompilerCodeCfg cfg;
 
     cfg.lazyEval = line.starts_with("#lazyeval ");
-    cfg.use_cpp2 = useCpp2;
+    cfg.use_cpp2 = replState.useCpp2;
 
     if (line.starts_with("#batch_eval ")) {
         line = line.substr(11);
@@ -1927,7 +1902,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         cfg.analyze = false;
     }
 
-    if (auto rerun = evalResults.find(line); rerun != evalResults.end()) {
+    if (auto rerun = replState.evalResults.find(line); rerun != replState.evalResults.end()) {
         try {
             if (rerun->second.exec) {
                 std::cout << "Rerunning compiled command" << std::endl;
@@ -2003,7 +1978,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     auto evalRes = compileAndRunCode(std::move(cfg));
 
     if (evalRes.success) {
-        evalResults.insert_or_assign(line, evalRes);
+        replState.evalResults.insert_or_assign(line, evalRes);
     }
 
     return true;
