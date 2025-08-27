@@ -10,6 +10,7 @@
 #include <cstring>
 #include <execution>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -58,9 +59,10 @@ std::string CompilerService::buildCompileCommand(
     const std::string &compiler, const std::string &std,
     const std::string &flags, const std::string &inputFile,
     const std::string &outputFile) const {
-    return compiler + " -std=" + std + " " + flags + " " +
-           getIncludeDirectoriesStr() + " " + getPreprocessorDefinitionsStr() +
-           " " + inputFile + " " + getLinkLibrariesStr() + " -o " + outputFile;
+    return std::format("{} -std={} {} {} {} {} {} -o {}", compiler, std, flags,
+                       getIncludeDirectoriesStr(),
+                       getPreprocessorDefinitionsStr(), inputFile,
+                       getLinkLibrariesStr(), outputFile);
 }
 
 CompilerResult<int>
@@ -91,7 +93,7 @@ CompilerService::concatenateNames(const std::vector<std::string> &names) const {
     concat.reserve(totalSize);
 
     for (const auto &name : names) {
-        concat += name + " ";
+        concat += std::format("{} ", name);
     }
 
     return concat;
@@ -111,7 +113,7 @@ std::string CompilerService::readLogFile(const std::string &logPath) const {
     std::string line;
 
     while (std::getline(logFile, line)) {
-        content += line + "\n";
+        content += std::format("{}\n", line);
     }
 
     return content;
@@ -207,11 +209,12 @@ CompilerResult<int> CompilerService::buildLibraryOnly(
     const std::string &ext, const std::string &std) const {
     std::string includePrecompiledHeader = getPrecompiledHeaderFlag(ext);
 
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g -Wl,--export-dynamic -fPIC " + name + ext + " " +
-               getLinkLibrariesStr() + " -o lib" + name + ".so";
+    auto cmd =
+        std::format("{} -std={} -shared {} {} {} -g -Wl,--export-dynamic -fPIC "
+                    "{}{} {} -o lib{}.so",
+                    compiler, std, includePrecompiledHeader,
+                    getIncludeDirectoriesStr(), getPreprocessorDefinitionsStr(),
+                    name, ext, getLinkLibrariesStr(), name);
 
     return executeCommand(cmd);
 }
@@ -224,11 +227,12 @@ CompilerResult<std::vector<VarDecl>> CompilerService::buildLibraryWithAST(
     std::string includePrecompiledHeader = getPrecompiledHeaderFlag(ext);
 
     // First build - compile to shared library
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g -Wl,--export-dynamic -fPIC " + name + ext + " " +
-               getLinkLibrariesStr() + " -o lib" + name + ".so";
+    auto cmd =
+        std::format("{} -std={} -shared {} {} {} -g -Wl,--export-dynamic -fPIC "
+                    "{}{} {} -o lib{}.so",
+                    compiler, std, includePrecompiledHeader,
+                    getIncludeDirectoriesStr(), getPreprocessorDefinitionsStr(),
+                    name, ext, getLinkLibrariesStr(), name);
 
     auto buildResult = executeCommand(cmd);
     if (!buildResult) {

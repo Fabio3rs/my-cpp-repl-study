@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <exceptdefs.h>
 #include <execinfo.h>
+#include <format>
 #include <iostream>
 #include <segvcatch.h>
 #include <stdexcept>
@@ -16,13 +17,13 @@ using namespace std;
 
 void handle_segv(const segvcatch::hardware_exception_info &info) {
     throw segvcatch::segmentation_fault(
-        "SEGV at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        std::format("SEGV at: {}", reinterpret_cast<uintptr_t>(info.addr)),
         info);
 }
 
 void handle_fpe(const segvcatch::hardware_exception_info &info) {
     throw segvcatch::floating_point_error(
-        "FPE at: " + std::to_string(reinterpret_cast<uintptr_t>(info.addr)),
+        std::format("FPE at: {}", reinterpret_cast<uintptr_t>(info.addr)),
         info);
 }
 

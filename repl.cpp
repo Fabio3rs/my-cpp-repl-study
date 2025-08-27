@@ -24,6 +24,7 @@
 #include <execinfo.h>
 #include <execution>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -132,8 +133,8 @@ int onlyBuildLib(std::string compiler, const std::string &name,
     auto result = compilerService->buildLibraryOnly(compiler, name, ext, std);
 
     if (!result) {
-        std::cerr << "Build failed with error code: "
-                  << static_cast<int>(result.error) << std::endl;
+        std::cerr << std::format("Build failed with error code: {}\n",
+                                 static_cast<int>(result.error));
     }
 
     return result.success() ? result.value : -1;
@@ -147,8 +148,8 @@ int buildLibAndDumpAST(std::string compiler, const std::string &name,
         compilerService->buildLibraryWithAST(compiler, name, ext, std);
 
     if (!result) {
-        std::cerr << "Build with AST failed with error code: "
-                  << static_cast<int>(result.error) << std::endl;
+        std::cerr << std::format("Build with AST failed with error code: {}\n",
+                                 static_cast<int>(result.error));
         return -1;
     }
 
@@ -214,7 +215,7 @@ auto runProgramGetOutput(std::string_view cmd) {
     result.second = pclose(pipe);
 
     if (result.second != 0) {
-        std::cerr << "program failed! " << result.second << std::endl;
+        std::cerr << std::format("program failed! {}\n", result.second);
     }
 
     buffer.resize(finalSize);
@@ -230,8 +231,9 @@ int build_precompiledheader(
     auto result = compilerService->buildPrecompiledHeader(compiler, context);
 
     if (!result) {
-        std::cerr << "Precompiled header build failed with error code: "
-                  << static_cast<int>(result.error) << std::endl;
+        std::cerr << std::format(
+            "Precompiled header build failed with error code: {}\n",
+            static_cast<int>(result.error));
         return -1;
     }
 
@@ -246,9 +248,10 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     }
 
     static int i = 0;
-    std::string name = "printerOutput" + std::to_string(i++);
+    std::string name = std::format("printerOutput{}", i++);
 
-    std::fstream printerOutput(name + ".cpp", std::ios::out | std::ios::trunc);
+    std::fstream printerOutput(std::format("{}.cpp", name),
+                               std::ios::out | std::ios::trunc);
 
     printerOutput << "#include \"printerOutput.hpp\"\n\n" << std::endl;
     printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
@@ -258,10 +261,10 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
         /*std::cout << var.qualType << "   " << var.type << "   " << var.name
                   << std::endl;*/
         if (var.kind == "VarDecl") {
-            printerOutput << "extern \"C\" void printvar_" << var.name
-                          << "() {\n";
-            printerOutput << "  printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("extern \"C\" void printvar_{}() {{\n",
+                                         var.name);
+            printerOutput << std::format("  printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
             printerOutput << "}\n";
         }
     }
@@ -271,8 +274,8 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
         }
     }
 
@@ -283,25 +286,26 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     int buildLibRes = onlyBuildLib("clang++", name);
 
     if (buildLibRes != 0) {
-        std::cerr << "buildLibRes != 0: " << name << std::endl;
+        std::cerr << std::format("buildLibRes != 0: {}\n", name);
         return;
     }
 
     void *handlep =
-        dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
+        dlopen(std::format("./lib{}.so", name).c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (!handlep) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
+        std::cerr << std::format("Cannot open library: {}\n", dlerror());
         return;
     }
 
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            void (*printvar)() =
-                (void (*)())dlsym(handlep, ("printvar_" + var.name).c_str());
+            void (*printvar)() = (void (*)())dlsym(
+                handlep, std::format("printvar_{}", var.name).c_str());
             if (!printvar) {
-                std::cerr << "Cannot load symbol 'printvar_" << var.name
-                          << "': " << dlerror() << '\n';
+                std::cerr << std::format(
+                    "Cannot load symbol 'printvar_{}': {}\n", var.name,
+                    dlerror());
                 dlclose(handlep);
                 return;
             }
@@ -327,8 +331,8 @@ void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
         }
     }
 
@@ -377,7 +381,7 @@ auto analyzeCustomCommands(
         std::string purefilename = path.filename().string();
         purefilename = purefilename.substr(0, purefilename.find_last_of('.'));
 
-        std::string logname = purefilename + ".log";
+        std::string logname = std::format("{}.log", purefilename);
         std::string cmd = namecmd.second;
 
         // Adiciona flags padrão se necessário
@@ -388,9 +392,9 @@ auto analyzeCustomCommands(
         }
 
         // Adiciona flags para análise AST e redirecionamento para JSON
-        std::string jsonFile = purefilename + "_ast.json";
+        std::string jsonFile = std::format("{}_ast.json", purefilename);
         cmd += " -Xclang -ast-dump=json -fsyntax-only";
-        cmd += " 2>" + logname + " > " + jsonFile;
+        cmd += std::format(" 2>{} > {}", logname, jsonFile);
 
         formattedCommands.push_back(cmd);
     }
@@ -432,8 +436,8 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     auto result = compilerService->linkObjects(objects, libname);
 
     if (!result) {
-        std::cerr << "Linking failed with error code: "
-                  << static_cast<int>(result.error) << std::endl;
+        std::cerr << std::format("Linking failed with error code: {}\n",
+                                 static_cast<int>(result.error));
     }
 
     return result.success() ? result.value : -1;
@@ -449,8 +453,9 @@ auto buildLibAndDumpASTWithoutPrint(
         compiler, libname, names, std);
 
     if (!result) {
-        std::cerr << "Build multiple sources failed with error code: "
-                  << static_cast<int>(result.error) << std::endl;
+        std::cerr << std::format(
+            "Build multiple sources failed with error code: {}\n",
+            static_cast<int>(result.error));
         return {{}, -1};
     }
 
@@ -461,13 +466,14 @@ auto buildLibAndDumpASTWithoutPrint(
 int runPrintAll() {
     void *handlep = dlopen("./libprinterOutput.so", RTLD_NOW | RTLD_GLOBAL);
     if (!handlep) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
+        std::cerr << std::format("Cannot open library: {}\n", dlerror());
         return EXIT_FAILURE;
     }
 
     void (*printall)() = (void (*)())dlsym(handlep, "_Z8printallv");
     if (!printall) {
-        std::cerr << "Cannot load symbol 'printall': " << dlerror() << '\n';
+        std::cerr << std::format("Cannot load symbol 'printall': {}\n",
+                                 dlerror());
         dlclose(handlep);
         return EXIT_FAILURE;
     }
@@ -600,8 +606,8 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
      * Function related to loadFn_"funcion name", this function is called when
      * the library constructor tries to run and the function is not loaded yet.
      */
-    std::cout << __LINE__ << ": Function segfaulted: " << name
-              << "   library: " << lastLibrary << std::endl;
+    std::cout << std::format("{}: Function segfaulted: {}   library: {}\n",
+                             __LINE__, name, lastLibrary);
 
     /*
      * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
@@ -609,19 +615,19 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
     auto base = get_library_start_address(lastLibrary.c_str());
 
     if (base == 0) {
-        std::cerr << __LINE__ << ": base == 0" << lastLibrary << std::endl;
+        std::cerr << std::format("{}: base == 0{}\n", __LINE__, lastLibrary);
 
         auto handle = dlopen(lastLibrary.c_str(), RTLD_NOLOAD);
 
         if (handle == nullptr) {
-            std::cerr << __LINE__ << ": handle == nullptr" << lastLibrary
-                      << std::endl;
+            std::cerr << std::format("{}: handle == nullptr{}\n", __LINE__,
+                                     lastLibrary);
             return;
         }
 
         for (const auto &[symbol, offset] : symbolsToResolve) {
-            void **wrap_ptrfn =
-                (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
+            void **wrap_ptrfn = (void **)dlsym(
+                RTLD_DEFAULT, std::format("{}_ptr", symbol).c_str());
 
             if (wrap_ptrfn == nullptr) {
                 continue;
@@ -630,8 +636,8 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
             auto tmp = dlsym(handle, symbol.c_str());
 
             if (tmp == nullptr) {
-                std::cerr << __LINE__ << ": tmp == nullptr" << lastLibrary
-                          << std::endl;
+                std::cerr << std::format("{}: tmp == nullptr{}\n", __LINE__,
+                                         lastLibrary);
                 continue;
             }
 
@@ -646,7 +652,7 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
 
     for (const auto &[symbol, offset] : symbolsToResolve) {
         void **wrap_ptrfn =
-            (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
+            (void **)dlsym(RTLD_DEFAULT, std::format("{}_ptr", symbol).c_str());
 
         if (wrap_ptrfn == nullptr) {
             continue;
@@ -686,8 +692,9 @@ void prepareFunctionWrapper(
 
             // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
             // {
-            qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
-                          fnvars.mangledName + "()";
+            qualTypestr =
+                std::format("extern \"C\" void __attribute__ ((naked)) {}()",
+                            fnvars.mangledName);
             /*} else {
                 qualTypestr.insert(parem,
                                    std::string(" __attribute__ ((naked)) " +
@@ -700,24 +707,26 @@ void prepareFunctionWrapper(
              * initializes and the functions are not ready yet, it will try to
              * load the function address and set it to the pointer
              */
-            wrapper += "static void __attribute__((naked)) loadFn_" +
-                       fnvars.mangledName + "();\n";
+            wrapper +=
+                std::format("static void __attribute__((naked)) loadFn_{}();\n",
+                            fnvars.mangledName);
 
-            wrapper += "extern \"C\" void *" + fnvars.mangledName +
-                       "_ptr = reinterpret_cast<void*>(loadFn_" +
-                       fnvars.mangledName + ");\n\n";
+            wrapper += std::format("extern \"C\" void *{}_ptr = "
+                                   "reinterpret_cast<void*>(loadFn_{});\n\n",
+                                   fnvars.mangledName, fnvars.mangledName);
             wrapper += qualTypestr + " {\n";
-            wrapper += R"(    __asm__ __volatile__ (
+            wrapper += std::format(R"(    __asm__ __volatile__ (
         "jmp *%0\n"
         :
-        : "r" ()" + fnvars.mangledName +
-                       R"(_ptr)
+        : "r" ({}_ptr)
     );
-}
-)";
+}}
+)",
+                                   fnvars.mangledName);
 
-            wrapper += "static void __attribute__((naked)) loadFn_" +
-                       fnvars.mangledName + "() {\n";
+            wrapper += std::format(
+                "static void __attribute__((naked)) loadFn_{}() {{\n",
+                fnvars.mangledName);
 
             /*
              * Observations: Keep the stack aligned in 16 bytes before calling a
@@ -748,8 +757,8 @@ void prepareFunctionWrapper(
     __asm__ __volatile__ (
         "movq %0, %%rax"
         :
-        : "r" (&)" + fnvars.mangledName +
-                       R"(_ptr)
+        : "r" (&)" + std::format("{}_ptr", fnvars.mangledName) +
+                       R"()
     );
 
     __asm__(
@@ -760,7 +769,7 @@ void prepareFunctionWrapper(
                                                                           // pointer
         "movq    %rax, %rdi          \n" // Parameter 1: pointer address
         "leaq    .LC)" +
-                       fnvars.mangledName +
+                       std::format("{}", fnvars.mangledName) +
                        R"((%rip), %rsi    \n" // Address of string "a"
 
         // Call loadfnToPtr function
@@ -804,8 +813,8 @@ void prepareFunctionWrapper(
     }
 
     if (!functions.empty()) {
-        auto wrappername = "wrapper_" + name;
-        std::fstream wrapperOutput(wrappername + ".cpp",
+        auto wrappername = std::format("wrapper_{}", name);
+        std::fstream wrapperOutput(std::format("{}.cpp", wrappername),
                                    std::ios::out | std::ios::trunc);
         wrapperOutput << wrapper << std::endl;
         wrapperOutput.close();
@@ -821,7 +830,7 @@ void fillWrapperPtrs(
         void *fnptr = dlsym(handle, mangledName.c_str());
         if (!fnptr) {
             void **wrap_ptrfn =
-                (void **)dlsym(handlewp, (fns + "_ptr").c_str());
+                (void **)dlsym(handlewp, std::format("{}_ptr", fns).c_str());
 
             if (!wrap_ptrfn) {
                 continue;
@@ -853,12 +862,12 @@ void fillWrapperPtrs(
 
         fn.fnptr = fnptr;
 
-        void **wrap_ptrfn =
-            (void **)dlsym(handlewp, (mangledName + "_ptr").c_str());
+        void **wrap_ptrfn = (void **)dlsym(
+            handlewp, std::format("{}_ptr", mangledName).c_str());
 
         if (!wrap_ptrfn) {
-            std::cerr << "Cannot load symbol '" << mangledName
-                      << "_ptr': " << dlerror() << '\n';
+            std::cerr << std::format("Cannot load symbol '{}': {}\n",
+                                     mangledName, dlerror());
             continue;
         }
 
@@ -915,11 +924,12 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     void *handlewp = nullptr;
 
     if (!functions.empty()) {
-        handlewp = dlopen(("./libwrapper_" + cfg.repl_name + ".so").c_str(),
-                          RTLD_NOW | RTLD_GLOBAL);
+        handlewp =
+            dlopen(std::format("./libwrapper_{}.so", cfg.repl_name).c_str(),
+                   RTLD_NOW | RTLD_GLOBAL);
 
         if (!handlewp) {
-            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            std::cerr << std::format("Cannot wrapper library: {}\n", dlerror());
             // return false;
         }
     }
@@ -933,7 +943,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     auto load_start = std::chrono::steady_clock::now();
 
-    lastLibrary = ("./lib" + cfg.repl_name + ".so");
+    lastLibrary = std::format("./lib{}.so", cfg.repl_name);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
@@ -1062,11 +1072,11 @@ bool loadPrebuilt(const std::string &path) {
     void *handlewp = nullptr;
 
     if (!functions.empty()) {
-        handlewp = dlopen(("./libwrapper_" + filename + ".so").c_str(),
+        handlewp = dlopen(std::format("./libwrapper_{}.so", filename).c_str(),
                           RTLD_NOW | RTLD_GLOBAL);
 
         if (!handlewp) {
-            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            std::cerr << std::format("Cannot wrapper library: {}\n", dlerror());
             // return false;
         }
     }
@@ -1078,9 +1088,10 @@ bool loadPrebuilt(const std::string &path) {
     if (filename.ends_with(".a") || filename.ends_with(".o")) {
         // g++  -Wl,--whole-archive base64.cc.o -Wl,--no-whole-archive -shared
         // -o teste.o
-        library = "./" + filename + ".so";
-        std::string cmd = "g++ -Wl,--whole-archive " + path +
-                          " -Wl,--no-whole-archive -shared -o " + library;
+        library = std::format("./{}.so", filename);
+        std::string cmd = std::format(
+            "g++ -Wl,--whole-archive {} -Wl,--no-whole-archive -shared -o {}",
+            path, library);
         std::cout << cmd << std::endl;
         system(cmd.c_str());
     }
@@ -1122,7 +1133,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     if (cfg.sourcesList.empty()) {
         if (cfg.analyze) {
             std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
-                cfg.compiler, cfg.repl_name, {cfg.repl_name + ".cpp"}, cfg.std);
+                cfg.compiler, cfg.repl_name,
+                {std::format("{}.cpp", cfg.repl_name)}, cfg.std);
         } else {
             onlyBuildLib(cfg.compiler, cfg.repl_name, "." + cfg.extension,
                          cfg.std);
@@ -1140,8 +1152,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     auto end = std::chrono::steady_clock::now();
 
     {
-        auto vars2 =
-            utility::getBuiltFileDecls("./lib" + cfg.repl_name + ".so");
+        auto vars2 = utility::getBuiltFileDecls(
+            std::format("./lib{}.so", cfg.repl_name));
 
         // add only if it does not exist
         for (const auto &var : vars2) {
@@ -1377,12 +1389,13 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
     // std::cout << line << std::endl;
 
-    cfg.repl_name = "repl_" + std::to_string(i++);
+    cfg.repl_name = std::format("repl_{}", i++);
 
     if (cfg.fileWrap) {
-        std::fstream replOutput(cfg.repl_name + "." +
-                                    (cfg.use_cpp2 ? "cpp2" : cfg.extension),
-                                std::ios::out | std::ios::trunc);
+        std::fstream replOutput(
+            std::format("{}.{}", cfg.repl_name,
+                        (cfg.use_cpp2 ? "cpp2" : cfg.extension)),
+            std::ios::out | std::ios::trunc);
 
         if (cfg.addIncludes) {
             replOutput << "#include \"precompiledheader.hpp\"\n\n";
@@ -1430,7 +1443,7 @@ auto compileAndRunCodeCustom(
     }
 
     CompilerCodeCfg cfg;
-    cfg.repl_name = "custom_lib_" + std::to_string(replCounter++);
+    cfg.repl_name = std::format("custom_lib_{}", replCounter++);
 
     returnCode = linkAllObjects(objects, cfg.repl_name);
 

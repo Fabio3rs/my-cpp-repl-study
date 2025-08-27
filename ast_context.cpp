@@ -4,6 +4,7 @@
 #include "simdjson.h"
 #include <cassert>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -18,20 +19,19 @@ void AstContext::addInclude(const std::string &includePath) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
         includedFiles_.insert(includePath);
-        outputHeader_ += "#include \"" + includePath + "\"\n";
+        outputHeader_ += std::format("#include \"{}\"\n", includePath);
     }
 }
 
 void AstContext::addDeclaration(const std::string &declaration) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    outputHeader_ += declaration + "\n";
+    outputHeader_ += std::format("{}\n", declaration);
 }
 
 void AstContext::addLineDirective(int64_t line,
                                   const std::filesystem::path &file) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    outputHeader_ +=
-        "#line " + std::to_string(line) + " \"" + file.string() + "\"\n";
+    outputHeader_ += std::format("#line {} \"{}\"\n", line, file.string());
 }
 
 bool AstContext::isFileIncluded(const std::string &filePath) const {
@@ -281,7 +281,8 @@ void ContextualAstAnalyzer::analyzeInnerAST(std::filesystem::path source,
 
                 std::cout << "extern " << qualTypestr << ";" << std::endl;
 
-                context_->addDeclaration("extern " + qualTypestr + ";");
+                context_->addDeclaration(
+                    std::format("extern {};", qualTypestr));
             }
 
             auto mangledName = element["mangledName"];
@@ -309,12 +310,12 @@ void ContextualAstAnalyzer::analyzeInnerAST(std::filesystem::path source,
             if (auto bracket = typenamestr.find_first_of('[');
                 bracket != std::string::npos) {
                 typenamestr.insert(bracket,
-                                   " " + std::string(name_string.value()));
+                                   std::format(" {}", name_string.value()));
             } else {
-                typenamestr += " " + std::string(name_string.value());
+                typenamestr += std::format(" {}", name_string.value());
             }
 
-            context_->addDeclaration("extern " + typenamestr + ";");
+            context_->addDeclaration(std::format("extern {};", typenamestr));
 
             VarDecl var;
 
