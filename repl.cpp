@@ -443,10 +443,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -555,6 +556,130 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
     }
 }
 
+void generateFunctionWrapper(std::string &wrapper, const VarDecl &fnvars) {
+    auto qualTypestr = std::string(fnvars.qualType);
+    auto parem = qualTypestr.find_first_of('(');
+
+    // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
+    // {
+    qualTypestr = std::format("extern \"C\" void __attribute__ ((naked)) {}()",
+                              fnvars.mangledName);
+    /*} else {
+        qualTypestr.insert(parem,
+                           std::string(" __attribute__ ((naked)) " +
+                                       fnvars.mangledName));
+        qualTypestr.insert(0, "extern \"C\" ");
+    }*/
+
+    /*
+     * This is the function that will be called when the library
+     * initializes and the functions are not ready yet, it will try to
+     * load the function address and set it to the pointer
+     */
+    wrapper += std::format("static void __attribute__((naked)) loadFn_{}();\n",
+                           fnvars.mangledName);
+
+    wrapper += std::format("extern \"C\" void *{}_ptr = "
+                           "reinterpret_cast<void*>(loadFn_{});\n\n",
+                           fnvars.mangledName, fnvars.mangledName);
+    wrapper += qualTypestr + " {\n";
+    wrapper += std::format(R"(    __asm__ __volatile__ (
+        "jmp *%0\n"
+        :
+        : "r" ({}_ptr)
+    );
+}}
+)",
+                           fnvars.mangledName);
+
+    wrapper +=
+        std::format("static void __attribute__((naked)) loadFn_{}() {{\n",
+                    fnvars.mangledName);
+
+    /*
+     * Observations: Keep the stack aligned in 16 bytes before calling a
+     * function
+     */
+    wrapper += R"(
+    __asm__(
+        // Save all general-purpose registers
+        "pushq   %rax                \n"
+        "pushq   %rbx                \n"
+        "pushq   %rcx                \n"
+        "pushq   %rdx                \n"
+        "pushq   %rsi                \n"
+        "pushq   %rdi                \n"
+        "pushq   %rbp                \n"
+        "pushq   %r8                 \n"
+        "pushq   %r9                 \n"
+        "pushq   %r10                \n"
+        "pushq   %r11                \n"
+        "pushq   %r12                \n"
+        "pushq   %r13                \n"
+        "pushq   %r14                \n"
+        "pushq   %r15                \n"
+        "movq    %rsp, %rbp          \n" // Set Base Pointer
+    );
+        // Push parameters onto the stack
+        //"leaq    _Z21qRegisterResourceDataiPKhS0_S0__ptr(%rip), %rax  \n" // Address of pointer
+    __asm__ __volatile__ (
+        "movq %0, %%rax"
+        :
+        : "r" (&)" +
+               std::format("{}_ptr", fnvars.mangledName) +
+               R"()
+    );
+
+    __asm__(
+        // Push parameters onto the stack
+        //"leaq    )" +
+               fnvars.mangledName +
+               R"(_ptr(%rip), %rax  \n" // Address
+                                                                          // of
+                                                                          // pointer
+        "movq    %rax, %rdi          \n" // Parameter 1: pointer address
+        "leaq    .LC)" +
+               std::format("{}", fnvars.mangledName) +
+               R"((%rip), %rsi    \n" // Address of string "a"
+
+        // Call loadfnToPtr function
+        "call    loadfnToPtr  \n" // Call loadfnToPtr function
+
+        // Restore all general-purpose registers
+        "popq    %r15                \n"
+        "popq    %r14                \n"
+        "popq    %r13                \n"
+        "popq    %r12                \n"
+        "popq    %r11                \n"
+        "popq    %r10                \n"
+        "popq    %r9                 \n"
+        "popq    %r8                 \n"
+        "popq    %rbp                \n"
+        "popq    %rdi                \n"
+        "popq    %rsi                \n"
+        "popq    %rdx                \n"
+        "popq    %rcx                \n"
+        "popq    %rbx                \n"
+        "popq    %rax                \n");
+    __asm__ __volatile__("jmp *%0\n"
+                         :
+                         : "r"()" +
+               fnvars.mangledName +
+               R"(_ptr));
+
+
+    __asm__(".section .rodata            \n"
+            ".LC)" +
+               fnvars.mangledName +
+               R"(:                        \n"
+            ".string \")" +
+               fnvars.mangledName +
+               R"(\"                \n");
+    __asm__(".section .text            \n");
+}
+            )";
+}
+
 void prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     std::unordered_map<std::string, std::string> &functions) {
@@ -580,126 +705,8 @@ void prepareFunctionWrapper(
 
         if (!fnNames.contains(fnvars.mangledName)) {
             addedFns.insert(fnvars.mangledName);
-            auto qualTypestr = std::string(fnvars.qualType);
-            auto parem = qualTypestr.find_first_of('(');
 
-            // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
-            // {
-            qualTypestr =
-                std::format("extern \"C\" void __attribute__ ((naked)) {}()",
-                            fnvars.mangledName);
-            /*} else {
-                qualTypestr.insert(parem,
-                                   std::string(" __attribute__ ((naked)) " +
-                                               fnvars.mangledName));
-                qualTypestr.insert(0, "extern \"C\" ");
-            }*/
-
-            /*
-             * This is the function that will be called when the library
-             * initializes and the functions are not ready yet, it will try to
-             * load the function address and set it to the pointer
-             */
-            wrapper +=
-                std::format("static void __attribute__((naked)) loadFn_{}();\n",
-                            fnvars.mangledName);
-
-            wrapper += std::format("extern \"C\" void *{}_ptr = "
-                                   "reinterpret_cast<void*>(loadFn_{});\n\n",
-                                   fnvars.mangledName, fnvars.mangledName);
-            wrapper += qualTypestr + " {\n";
-            wrapper += std::format(R"(    __asm__ __volatile__ (
-        "jmp *%0\n"
-        :
-        : "r" ({}_ptr)
-    );
-}}
-)",
-                                   fnvars.mangledName);
-
-            wrapper += std::format(
-                "static void __attribute__((naked)) loadFn_{}() {{\n",
-                fnvars.mangledName);
-
-            /*
-             * Observations: Keep the stack aligned in 16 bytes before calling a
-             * function
-             */
-            wrapper += R"(
-    __asm__(
-        // Save all general-purpose registers
-        "pushq   %rax                \n"
-        "pushq   %rbx                \n"
-        "pushq   %rcx                \n"
-        "pushq   %rdx                \n"
-        "pushq   %rsi                \n"
-        "pushq   %rdi                \n"
-        "pushq   %rbp                \n"
-        "pushq   %r8                 \n"
-        "pushq   %r9                 \n"
-        "pushq   %r10                \n"
-        "pushq   %r11                \n"
-        "pushq   %r12                \n"
-        "pushq   %r13                \n"
-        "pushq   %r14                \n"
-        "pushq   %r15                \n"
-        "movq    %rsp, %rbp          \n" // Set Base Pointer
-    );
-        // Push parameters onto the stack
-        //"leaq    _Z21qRegisterResourceDataiPKhS0_S0__ptr(%rip), %rax  \n" // Address of pointer
-    __asm__ __volatile__ (
-        "movq %0, %%rax"
-        :
-        : "r" (&)" + std::format("{}_ptr", fnvars.mangledName) +
-                       R"()
-    );
-
-    __asm__(
-        // Push parameters onto the stack
-        //"leaq    )" + fnvars.mangledName +
-                       R"(_ptr(%rip), %rax  \n" // Address
-                                                                          // of
-                                                                          // pointer
-        "movq    %rax, %rdi          \n" // Parameter 1: pointer address
-        "leaq    .LC)" +
-                       std::format("{}", fnvars.mangledName) +
-                       R"((%rip), %rsi    \n" // Address of string "a"
-
-        // Call loadfnToPtr function
-        "call    loadfnToPtr  \n" // Call loadfnToPtr function
-
-        // Restore all general-purpose registers
-        "popq    %r15                \n"
-        "popq    %r14                \n"
-        "popq    %r13                \n"
-        "popq    %r12                \n"
-        "popq    %r11                \n"
-        "popq    %r10                \n"
-        "popq    %r9                 \n"
-        "popq    %r8                 \n"
-        "popq    %rbp                \n"
-        "popq    %rdi                \n"
-        "popq    %rsi                \n"
-        "popq    %rdx                \n"
-        "popq    %rcx                \n"
-        "popq    %rbx                \n"
-        "popq    %rax                \n");
-    __asm__ __volatile__("jmp *%0\n"
-                         :
-                         : "r"()" +
-                       fnvars.mangledName +
-                       R"(_ptr));
-
-
-    __asm__(".section .rodata            \n"
-            ".LC)" + fnvars.mangledName +
-                       R"(:                        \n"
-            ".string \")" +
-                       fnvars.mangledName +
-                       R"(\"                \n");
-    __asm__(".section .text            \n");
-}
-            )";
+            generateFunctionWrapper(wrapper, fnvars);
         }
 
         functions[fnvars.mangledName] = fnvars.name;
