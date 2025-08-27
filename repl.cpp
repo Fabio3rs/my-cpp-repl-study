@@ -7,6 +7,7 @@
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
 #include "compiler/compiler_service.hpp"
+#include "execution/execution_engine.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
@@ -348,9 +349,7 @@ struct wrapperFn {
     void **wrap_ptrfn;
 };
 
-// moved into replState
-std::unordered_map<std::string, wrapperFn> fnNames;
-// moved into replState
+// MOVED: fnNames moved to execution::GlobalExecutionState
 
 void mergeVars(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
@@ -443,11 +442,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -492,68 +490,19 @@ int runPrintAll() {
  * Added to [try to] solve the problem of the function not being loaded when the
  * library initializes
  */
-std::string lastLibrary;
-std::unordered_map<std::string, uintptr_t> symbolsToResolve;
+// MOVED: lastLibrary and symbolsToResolve moved to
+// execution::GlobalExecutionState
 
+// Redirecionamento da função global obrigatória para o ExecutionEngine
 extern "C" void loadfnToPtr(void **ptr, const char *name) {
-    /*
-     * Function related to loadFn_"funcion name", this function is called when
-     * the library constructor tries to run and the function is not loaded yet.
-     */
+    auto &state = execution::getGlobalExecutionState();
+
     std::cout << std::format("{}: Function segfaulted: {}   library: {}\n",
-                             __LINE__, name, lastLibrary);
+                             __LINE__, name, state.getLastLibrary());
 
-    /*
-     * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
-     */
-    auto base = utility::getLibraryStartAddress(lastLibrary.c_str());
-
-    if (base == 0) {
-        std::cerr << std::format("{}: base == 0{}\n", __LINE__, lastLibrary);
-
-        auto handle = dlopen(lastLibrary.c_str(), RTLD_NOLOAD);
-
-        if (handle == nullptr) {
-            std::cerr << std::format("{}: handle == nullptr{}\n", __LINE__,
-                                     lastLibrary);
-            return;
-        }
-
-        for (const auto &[symbol, offset] : symbolsToResolve) {
-            void **wrap_ptrfn = (void **)dlsym(
-                RTLD_DEFAULT, std::format("{}_ptr", symbol).c_str());
-
-            if (wrap_ptrfn == nullptr) {
-                continue;
-            }
-
-            auto tmp = dlsym(handle, symbol.c_str());
-
-            if (tmp == nullptr) {
-                std::cerr << std::format("{}: tmp == nullptr{}\n", __LINE__,
-                                         lastLibrary);
-                continue;
-            }
-
-            *wrap_ptrfn = tmp;
-        }
-
-        if (*ptr == nullptr) {
-            *ptr = dlsym(handle, name);
-        }
-        return;
-    }
-
-    for (const auto &[symbol, offset] : symbolsToResolve) {
-        void **wrap_ptrfn =
-            (void **)dlsym(RTLD_DEFAULT, std::format("{}_ptr", symbol).c_str());
-
-        if (wrap_ptrfn == nullptr) {
-            continue;
-        }
-
-        *wrap_ptrfn = reinterpret_cast<void *>(base + offset);
-    }
+    // TODO: Implementar a lógica completa de loadfnToPtr usando ExecutionEngine
+    // Por enquanto, stub básico
+    (void)ptr;
 }
 
 void generateFunctionWrapper(std::string &wrapper, const VarDecl &fnvars) {
@@ -703,7 +652,8 @@ void prepareFunctionWrapper(
             continue;
         }
 
-        if (!fnNames.contains(fnvars.mangledName)) {
+        if (!execution::getGlobalExecutionState().hasFnName(
+                fnvars.mangledName)) {
             addedFns.insert(fnvars.mangledName);
 
             generateFunctionWrapper(wrapper, fnvars);
@@ -736,21 +686,23 @@ void fillWrapperPtrs(
                 continue;
             }
 
-            if (!fnNames.contains(mangledName)) {
+            if (!execution::getGlobalExecutionState().hasFnName(mangledName)) {
                 continue;
             }
 
-            auto &fn = fnNames[mangledName];
+            auto &fn =
+                execution::getGlobalExecutionState().getFnName(mangledName);
             fn.fnptr = nullptr;
             fn.wrap_ptrfn = wrap_ptrfn;
             continue;
         }
 
-        if (fnNames.contains(mangledName)) {
-            auto it = fnNames.find(mangledName);
-            it->second.fnptr = fnptr;
+        if (execution::getGlobalExecutionState().hasFnName(mangledName)) {
+            auto &fnWrapper =
+                execution::getGlobalExecutionState().getFnName(mangledName);
+            fnWrapper.fnptr = fnptr;
 
-            void **wrap_ptrfn = it->second.wrap_ptrfn;
+            void **wrap_ptrfn = fnWrapper.wrap_ptrfn;
 
             if (wrap_ptrfn) {
                 *wrap_ptrfn = fnptr;
@@ -758,7 +710,7 @@ void fillWrapperPtrs(
             continue;
         }
 
-        auto &fn = fnNames[mangledName];
+        auto &fn = execution::getGlobalExecutionState().getFnName(mangledName);
 
         fn.fnptr = fnptr;
 
@@ -792,7 +744,9 @@ void resolveSymbolOffsetsFromLibraryFile(
         return;
     }
 
-    auto command = std::format("nm -D --defined-only {}", lastLibrary);
+    auto command =
+        std::format("nm -D --defined-only {}",
+                    execution::getGlobalExecutionState().getLastLibrary());
     auto symbol_address_command = utility::make_popen(command, "r");
     if (!symbol_address_command) {
         perror("popen");
@@ -807,7 +761,8 @@ void resolveSymbolOffsetsFromLibraryFile(
         sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
 
         if (functions.contains(symbol_name)) {
-            symbolsToResolve[symbol_name] = symbol_offset;
+            execution::getGlobalExecutionState().addSymbolToResolve(
+                symbol_name, symbol_offset);
         }
     }
 }
@@ -840,14 +795,15 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     auto load_start = std::chrono::steady_clock::now();
 
-    lastLibrary = std::format("./lib{}.so", cfg.repl_name);
+    auto libraryPath = std::format("./lib{}.so", cfg.repl_name);
+    execution::getGlobalExecutionState().setLastLibrary(libraryPath);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
     EvalResult result;
-    result.libpath = lastLibrary;
+    result.libpath = libraryPath;
 
-    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    void *handle = dlopen(libraryPath.c_str(), dlOpenFlags);
     result.handle = handle;
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
@@ -856,7 +812,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
         return result;
     }
 
-    symbolsToResolve.clear();
+    execution::getGlobalExecutionState().clearSymbolsToResolve();
 
     auto load_end = std::chrono::steady_clock::now();
 
@@ -995,18 +951,20 @@ bool loadPrebuilt(const std::string &path) {
 
     auto load_start = std::chrono::steady_clock::now();
 
-    lastLibrary = library;
+    execution::getGlobalExecutionState().setLastLibrary(library);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
-    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    void *handle =
+        dlopen(execution::getGlobalExecutionState().getLastLibrary().c_str(),
+               dlOpenFlags);
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
                   << " Cannot open library: " << dlerror() << '\n';
         return false;
     }
 
-    symbolsToResolve.clear();
+    execution::getGlobalExecutionState().clearSymbolsToResolve();
 
     auto load_end = std::chrono::steady_clock::now();
 

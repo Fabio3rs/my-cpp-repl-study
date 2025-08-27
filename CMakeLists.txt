@@ -32,7 +32,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_link_options(-Wl,--export-dynamic)
 
-add_library(cpprepl_lib repl.cpp simdjson.cpp simdjson.h ast_context.cpp clang_ast_adapter.cpp src/compiler/compiler_service.cpp utility/backtraced_exceptions.cpp utility/library_introspection.cpp printerOverloads.cpp utility/quote.cpp)
+add_library(cpprepl_lib repl.cpp simdjson.cpp simdjson.h ast_context.cpp clang_ast_adapter.cpp src/compiler/compiler_service.cpp utility/backtraced_exceptions.cpp utility/library_introspection.cpp printerOverloads.cpp utility/quote.cpp src/execution/execution_engine.cpp)
 target_precompile_headers(cpprepl_lib PUBLIC stdafx.hpp)
 target_link_libraries(cpprepl_lib pthread dl tbb readline)
 

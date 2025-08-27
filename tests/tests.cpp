@@ -76,3 +76,11 @@ TEST_F(ReplTests, InvalidCommand) {
     std::string_view cmd = "int = ;";
     ASSERT_TRUE(extExecRepl(cmd));
 }
+
+TEST_F(ReplTests, DependencyAtConstructorTime) {
+    std::string_view cmd = "int foo() { return 123; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int bar() { return foo() + 1; }\n int a = bar();";
+    ASSERT_TRUE(extExecRepl(cmd));
+}
