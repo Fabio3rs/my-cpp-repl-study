@@ -28,14 +28,12 @@
 #include <format>
 #include <fstream>
 #include <functional>
-#include <iterator>
 #include <mutex>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <segvcatch.h>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <tuple>
 #include <unistd.h>
 #include <unordered_map>
@@ -445,11 +443,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -490,106 +487,6 @@ int runPrintAll() {
 
 #define MAX_LINE_LENGTH 1024
 
-auto get_library_start_address(const char *library_name) -> uintptr_t {
-    std::string line(MAX_LINE_LENGTH, 0);
-    std::string library_path(MAX_LINE_LENGTH, 0);
-    uintptr_t start_address{}, end_address{};
-
-    // Open /proc/self/maps
-    auto maps_file = utility::make_fopen("/proc/self/maps", "r");
-    if (!maps_file) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Search for the library in memory maps
-    while (fgets(line.data(), MAX_LINE_LENGTH, maps_file.get()) != NULL) {
-        library_path.front() = 0;
-        line.back() = 0;
-        line[strcspn(line.data(), "\n")] = 0;
-        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
-                  << std::endl;
-        try {
-            sscanf(line.c_str(), "%zx-%zx %*s %*s %*s %*s %1023s",
-                   &start_address, &end_address, library_path.data());
-            std::error_code ec;
-            if (std::filesystem::equivalent(library_path, library_name, ec) &&
-                !ec) {
-                break;
-            }
-        } catch (...) {
-        }
-    }
-
-    if (library_path.front() == 0) {
-        printf("Library %s not found in memory maps.\n", library_name);
-        return 0;
-    }
-
-    return start_address;
-}
-
-auto get_symbol_address(const char *library_name, const char *symbol_name)
-    -> uintptr_t {
-    char line[MAX_LINE_LENGTH]{};
-    char library_path[MAX_LINE_LENGTH]{};
-    uintptr_t start_address{}, end_address{};
-    char command[MAX_LINE_LENGTH * 2]{};
-    uintptr_t symbol_offset = 0;
-
-    // Open /proc/self/maps
-    auto maps_file = utility::make_fopen("/proc/self/maps", "r");
-    if (!maps_file) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Search for the library in memory maps
-    while (fgets(line, MAX_LINE_LENGTH, maps_file.get()) != NULL) {
-        *library_path = 0;
-        int readed = sscanf(line, "%zx-%zx %*s %*s %*s %*s %s", &start_address,
-                            &end_address, library_path);
-        std::cout << readed << "   " << library_path << "   " << library_name
-                  << std::endl;
-        if (strnlen(library_path, std::size(library_path)) == 0) {
-            continue;
-        }
-
-        if (std::filesystem::equivalent(library_path, library_name)) {
-            // Get the base address of the library
-            break;
-        }
-    }
-
-    if (strlen(library_path) == 0) {
-        printf("Library %s not found in memory maps.\n", library_name);
-        return 0;
-    }
-
-    // Get the address of the symbol within the library using nm
-    sprintf(command, "nm -D --defined-only %s | grep ' %s$'", library_path,
-            symbol_name);
-    auto symbol_address_command = utility::make_popen(command, "r");
-    if (!symbol_address_command) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parse the output of nm command to get the symbol address
-    if (fgets(line, MAX_LINE_LENGTH, symbol_address_command.get()) != NULL) {
-        char address[17]; // Assuming address length of 16 characters
-        sscanf(line, "%16s", address);
-        sscanf(address, "%zx",
-               &symbol_offset); // Convert hex string to unsigned long
-        printf("Address of symbol %s in %s: 0x%zx\n", symbol_name, library_name,
-               start_address + symbol_offset);
-    } else {
-        printf("Symbol %s not found in %s.\n", symbol_name, library_name);
-    }
-
-    return start_address + symbol_offset;
-}
-
 /*
  * Added to [try to] solve the problem of the function not being loaded when the
  * library initializes
@@ -608,7 +505,7 @@ extern "C" void loadfnToPtr(void **ptr, const char *name) {
     /*
      * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
      */
-    auto base = get_library_start_address(lastLibrary.c_str());
+    auto base = utility::getLibraryStartAddress(lastLibrary.c_str());
 
     if (base == 0) {
         std::cerr << std::format("{}: base == 0{}\n", __LINE__, lastLibrary);
@@ -888,8 +785,7 @@ void resolveSymbolOffsetsFromLibraryFile(
         return;
     }
 
-    char command[1024]{};
-    sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
+    auto command = std::format("nm -D --defined-only {}", lastLibrary);
     auto symbol_address_command = utility::make_popen(command, "r");
     if (!symbol_address_command) {
         perror("popen");
