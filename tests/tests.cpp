@@ -101,3 +101,33 @@ TEST_F(ReplTests, RecursiveFunction) {
     ASSERT_TRUE(extExecRepl(cmd));
     ASSERT_EQ(120, std::any_cast<int>(getResultRepl("result")));
 }
+
+TEST_F(ReplTests, CodeWithIncludes) {
+    std::string_view cmd = R"(
+        #include <cmath>
+        double calculateHypotenuse(double a, double b) {
+            return std::sqrt(a * a + b * b);
+        }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "double result = calculateHypotenuse(3.0, 4.0);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(5.0, std::any_cast<double>(getResultRepl("result")));
+}
+
+TEST_F(ReplTests, FunctionOverloading) {
+    std::string_view cmd = R"(
+        int multiply(int a, int b) { return a * b; }
+        double multiply(double a, double b) { return a * b; }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int intResult = multiply(3, 4);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(12, std::any_cast<int>(getResultRepl("intResult")));
+
+    cmd = "double doubleResult = multiply(2.5, 4.0);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(10.0, std::any_cast<double>(getResultRepl("doubleResult")));
+}

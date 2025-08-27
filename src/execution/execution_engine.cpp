@@ -49,29 +49,4 @@ GlobalExecutionState &getGlobalExecutionState() {
     return instance;
 }
 
-// FUNÇÃO GLOBAL OBRIGATÓRIA para compatibilidade com assembly inline
-// NOTA: A implementação real está em repl.cpp como redirecionamento
-// Esta declaração é apenas para consistência do header
-// extern "C" void loadfnToPtr(void **ptr, const char *name);
-
-void resolveSymbolOffsetsFromLibraryFile(
-    const std::unordered_map<std::string, std::string> &functions) {
-    if (functions.empty()) {
-        return;
-    }
-
-    // TODO: Implementar resolução de símbolos
-    // Por enquanto, stub para compilação
-    (void)functions; // Evitar warning
-}
-
-void evalEverything() {
-    // TODO: Mover implementação de replState.lazyEvalFns
-    // Por enquanto, placeholder
-}
-
-// TODO: Implementar outras funções movidas do repl.cpp
-// prepareWrapperAndLoadCodeLib, fillWrapperPtrs, loadPrebuilt
-// Essas serão implementadas nas próximas etapas
-
 } // namespace execution
