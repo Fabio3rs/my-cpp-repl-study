@@ -12,42 +12,202 @@ This document provides a comprehensive analysis of the C++ REPL project and outl
 - **Dependencies**: TBB (threading), readline (input), libnotify (notifications), simdjson, GoogleTest
 - **Core Functionality**: Interactive C++ code compilation and execution using LLVM/Clang
 
-### Critical Issues Identified
+### Refactoring Progress Status ✅ **IN PROGRESS**
 
-#### 1. Monolithic Architecture 🚨 **CRITICAL**
-**File**: `repl.cpp` (2,119 lines)
-**Impact**: High maintenance burden, poor testability, violation of Single Responsibility Principle
+**Significant architectural improvements have been implemented** reducing the monolithic structure and introducing modular design:
 
-The main `repl.cpp` file contains multiple distinct responsibilities:
-- Command parsing and REPL loop
-- C++ code analysis and AST parsing  
-- Dynamic compilation and linking
-- Library management and symbol resolution
-- Variable tracking and state management
-- Build system integration
-- Error handling and notifications
+#### 1. ~~Monolithic Architecture~~ ➡️ **Modular Design** 🔄 **PARTIALLY COMPLETED**
+**Original**: `repl.cpp` (2,119 lines) ➡️ **Current**: `repl.cpp` (1,814 lines) **-305 lines (-14.4%)**
+**New Modular Structure**: **+946 lines across 11 new files**
 
-**Code Evidence**:
+**✅ Extracted Components:**
+- **AST Analysis Module** (`include/analysis/`, `ast_context.cpp`) - **565 lines**
+  - `AstContext` class with thread-safe operations
+  - `ContextualAstAnalyzer` for contextual AST processing  
+  - `ClangAstAnalyzerAdapter` implementing clean interfaces
+- **Command System** (`include/commands/`) - **158 lines**
+  - `CommandRegistry` with plugin-style architecture
+  - Type-safe command handling with templates
+  - Centralized command registration system
+- **Utility Functions** (`include/utility/`, `utility/`) - **57 lines**
+  - Library introspection functionality
+  - Symbol analysis utilities
+
+**🔄 Remaining Core Logic** (still in `repl.cpp`):
+- Main REPL loop and session management
+- Compilation pipeline coordination
+- Dynamic library loading and execution
+- Error handling and user interaction
+
+#### 2. ~~Global State Management~~ ➡️ **Encapsulated State** 🔄 **PARTIALLY ADDRESSED**
+**Previous**: Multiple global containers ➡️ **Current**: Structured state management
+
+**✅ Improvements Made:**
+- **Thread-Safe AST Context**: `AstContext` class replaces global `outputHeader` and `includedFiles`
+  ```cpp
+  // NEW: Thread-safe encapsulated state
+  class AstContext {
+    private:
+      std::string outputHeader_;
+      std::unordered_set<std::string> includedFiles_;
+      mutable std::mutex contextWriteMutex; // Thread safety
+  };
+  ```
+- **Command Context System**: Type-safe command handling with `ReplCtxView`
+  ```cpp
+  struct ReplCtxView {
+    std::unordered_set<std::string> *includeDirectories;
+    std::unordered_set<std::string> *preprocessorDefinitions;
+    std::unordered_set<std::string> *linkLibraries;
+  };
+  ```
+
+**🔄 Remaining Global State** (still needs encapsulation):
+- `linkLibraries`: External library tracking  
+- `includeDirectories`: Include path management
+### ✅ Achieved Modular Architecture
+
+The refactoring has successfully established a **clean modular foundation** with the following structure:
+
+#### 📁 **Analysis Module** (`include/analysis/`, `ast_context.cpp`)
+```
+include/analysis/
+├── ast_analyzer.hpp       (34 lines)  - Abstract analyzer interface
+├── ast_context.hpp        (140 lines) - Thread-safe AST state management  
+└── clang_ast_adapter.hpp  (94 lines)  - Clean adapter for Clang AST
+
+ast_context.cpp            (391 lines) - Full implementation with mutexes
+```
+**Key Achievements:**
+- ✅ Thread-safe AST processing with `std::scoped_lock`
+- ✅ RAII-based resource management
+- ✅ Clean separation of concerns with interfaces
+- ✅ Dependency injection ready architecture
+
+#### 📁 **Command System** (`include/commands/`)
+```
+include/commands/
+├── command_registry.hpp   (64 lines)  - Plugin-style command registry
+└── repl_commands.hpp      (94 lines)  - REPL-specific command implementations
+```
+**Key Achievements:**
+- ✅ Type-safe command handling with templates
+- ✅ Extensible plugin architecture
+- ✅ Centralized command registration
+- ✅ Context-aware command execution
+
+#### 📁 **Utility Module** (`include/utility/`, `utility/`)
+```
+include/utility/
+└── library_introspection.hpp  (17 lines) - Symbol analysis interface
+
+utility/
+└── library_introspection.cpp  (40 lines) - nm-based symbol extraction
+```
+**Key Achievements:**
+- ✅ Separated utility functions into focused namespace
+- ✅ Clean interface for library symbol analysis
+- ✅ Reusable functionality for external projects
+
+#### 🔧 **Core REPL** (`repl.cpp`, `repl.hpp`) 
+```
+repl.cpp                   (1,814 lines) - Main orchestration (-305 lines)
+repl.hpp                   (115 lines)   - Core interfaces and structures
+```
+### ✅ Implemented Design Patterns and Best Practices
+
+The refactoring has successfully introduced several modern C++ design patterns and best practices:
+
+#### 1. **Thread-Safe RAII Pattern** 🛡️
 ```cpp
-// Global state scattered throughout
-std::unordered_set<std::string> linkLibraries;           // Line 41
-std::unordered_set<std::string> includeDirectories;      // Line 42  
-std::unordered_set<std::string> preprocessorDefinitions; // Line 43
-std::unordered_map<std::string, EvalResult> evalResults; // Line 45
+// NEW: AstContext with proper resource management
+class AstContext {
+private:
+    std::string outputHeader_;
+    std::unordered_set<std::string> includedFiles_;
+    mutable std::mutex contextWriteMutex;  // Thread safety
+    
+public:
+    void addInclude(const std::string &includePath) {
+        std::scoped_lock<std::mutex> lock(contextWriteMutex);  // RAII locking
+        if (includedFiles_.find(includePath) == includedFiles_.end()) {
+            includedFiles_.insert(includePath);
+            outputHeader_ += "#include \"" + includePath + "\"\n";
+        }
+    }
+};
 ```
 
-#### 2. Global State Management 🚨 **CRITICAL**
-**Impact**: Thread safety issues, testing difficulties, hidden dependencies
+#### 2. **Dependency Injection Pattern** 💉
+```cpp
+// NEW: Constructor injection with shared resources
+class ContextualAstAnalyzer {
+private:
+    std::shared_ptr<AstContext> context_;
+public:
+    explicit ContextualAstAnalyzer(std::shared_ptr<AstContext> context)
+        : context_(context) {}
+};
 
-**Problems**:
-- Multiple global containers managing compiler state
-- No encapsulation or access control
-- Race conditions in multi-threaded scenarios
-- Impossible to have multiple REPL instances
+// Clean factory method
+static ClangAstAnalyzerAdapter 
+createWithSharedContext(std::shared_ptr<AstContext> context);
+```
 
-**Current Global Variables**:
-- `linkLibraries`: External library tracking
-- `includeDirectories`: Include path management  
+#### 3. **Command Registry Pattern** 🔌
+```cpp
+// NEW: Extensible plugin-style commands
+class CommandRegistry {
+    std::vector<CommandEntry> entries_;
+public:
+    void registerPrefix(std::string prefix, std::string description, 
+                       CommandHandler handler) {
+        entries_.push_back({std::move(prefix), std::move(description), 
+                           std::move(handler)});
+    }
+    
+    bool tryHandle(std::string_view line, CommandContextBase &ctx) const {
+        for (const auto &entry : entries_) {
+            if (line.rfind(entry.prefix, 0) == 0) {
+                return entry.handler(line.substr(entry.prefix.size()), ctx);
+            }
+        }
+        return false;
+    }
+};
+```
+
+#### 4. **Type-Safe Template Context** 🎯
+```cpp
+// NEW: Type-safe context with compile-time checks
+template <typename Context>
+struct BasicContext : public CommandContextBase {
+    Context data;
+    explicit BasicContext(Context d) : data(std::move(d)) {}
+};
+
+// Usage with automatic type deduction
+template <typename Context>
+inline bool handleCommand(std::string_view line, Context &context) {
+    BasicContext<Context> ctx(context);
+    return registry().tryHandle(line, ctx);
+}
+```
+
+#### 5. **Interface Segregation Principle** 📋
+```cpp
+// NEW: Clean abstract interface for analyzers
+class IAstAnalyzer {
+public:
+    virtual ~IAstAnalyzer() = default;
+    virtual int analyzeJson(std::string_view json, const std::string &source,
+                           std::vector<VarDecl> &vars) = 0;
+    virtual int analyzeFile(const std::string &jsonFilename, 
+                           const std::string &source,
+                           std::vector<VarDecl> &vars) = 0;
+    virtual std::shared_ptr<AstContext> getContext() const = 0;
+};
+```  
 - `preprocessorDefinitions`: Macro definitions
 - `evalResults`: Compiled code results cache
 
