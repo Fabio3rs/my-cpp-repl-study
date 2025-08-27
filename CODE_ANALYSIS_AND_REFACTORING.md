@@ -238,6 +238,156 @@ TEST_F(CompilerServiceTest, BuildLibraryWithValidSource) {
 }
 ```
 
+## Main Program Features and System Capabilities
+
+### 1. Operating Modes and Command Line Interface
+
+The C++ REPL supports multiple operating modes through command line flags in `main.cpp`:
+
+#### **Interactive Mode (Default)**
+Standard REPL behavior with live compilation and execution:
+```cpp
+int main(int argc, char **argv) {
+    initNotifications("cpprepl");
+    initRepl();
+    // ... flag processing ...
+    if (!bootstrapProgram) {
+        repl();  // Interactive REPL loop
+    }
+}
+```
+
+#### **Batch Run Mode (`-r` flag)**
+**Location**: `main.cpp` lines 146-172  
+**Purpose**: Execute REPL commands from a file for automated testing and scripting
+
+```cpp
+case 'r': {
+    std::string_view replCmdsFile(optarg);
+    std::fstream file(replCmdsFile.data(), std::ios::in);
+    
+    if (!file.is_open()) {
+        std::cerr << "Cannot open file: " << replCmdsFile << '\n';
+        return 1;
+    }
+    
+    std::string line;
+    try {
+        while (std::getline(file, line)) {
+            if (!extExecRepl(line)) {
+                break;
+            }
+        }
+    } catch (const segvcatch::hardware_exception &e) {
+        // Hardware exception handling with detailed diagnostics
+    } catch (const std::exception &e) {
+        std::cerr << "C++ Exception: " << e.what() << std::endl;
+    }
+} break;
+```
+
+**Key Features:**
+- **Line-by-line execution** of REPL commands from file
+- **Comprehensive exception handling** for both hardware and C++ exceptions
+- **Assembly instruction analysis** on segmentation faults
+- **Graceful termination** on errors or break conditions
+
+#### **Signal Handler Mode (`-s` flag)**
+**Location**: `main.cpp` lines 140-145  
+**Purpose**: Install robust signal handlers for graceful recovery
+
+```cpp
+case 's': {
+    printf("Setting signal handlers\n");
+    segvcatch::init_segv(&handle_segv);    // SIGSEGV handler
+    segvcatch::init_fpe(&handle_fpe);      // SIGFPE handler  
+    installCtrlCHandler();                 // Ctrl+C handler
+} break;
+```
+
+**Supported Signal Handlers:**
+- **SIGSEGV**: Segmentation fault recovery with detailed crash analysis
+- **SIGFPE**: Floating point exception handling
+- **SIGINT**: Ctrl+C graceful interruption with cleanup
+
+### 2. Plugin System and Dynamic Loading
+
+#### **#loadprebuilt Command**
+**Location**: `include/commands/repl_commands.hpp` lines 54-58  
+**Implementation**: Command registry system with dynamic library loading
+
+```cpp
+commands::registry().registerPrefix(
+    "#loadprebuilt ", "Load prebuilt library",
+    [](std::string_view arg, commands::CommandContextBase &) {
+        return loadPrebuilt(std::string(arg));
+    });
+```
+
+**Plugin Loading Capabilities:**
+- **Type-dependent loading**: Different plugin types supported based on implementation
+- **Dynamic library integration**: Uses dlopen/dlsym for runtime loading
+- **Command-line interface**: Simple `#loadprebuilt <name>` syntax
+- **Error handling**: Integrated with unified error reporting system
+
+#### **REPL Command System**
+**Complete command set available:**
+
+```cpp
+Command Set:
+#includedir <path>      - Add include directory
+#compilerdefine <def>   - Add compiler definition  
+#lib <name>            - Link library name (without lib prefix)
+#loadprebuilt <name>   - Load prebuilt library
+#cpp2                  - Enable cpp2 mode
+#cpp1                  - Disable cpp2 mode
+#help                  - List available commands
+```
+
+**Architecture Features:**
+- **Prefix-based matching**: Efficient command parsing
+- **Context passing**: Commands receive execution context
+- **Plugin-style architecture**: Easy command registration and extension
+- **Type-safe templates**: Modern C++ command handler patterns
+
+### 3. Error Recovery and Diagnostics
+
+#### **Hardware Exception Handling**
+**Advanced crash analysis with detailed diagnostics:**
+
+```cpp
+void handle_segv(const segvcatch::hardware_exception_info &info) {
+    throw segvcatch::segmentation_fault(
+        std::format("SEGV at: {}", reinterpret_cast<uintptr_t>(info.addr)),
+        info);
+}
+```
+
+**Diagnostic Features:**
+- **Address resolution**: Maps crash addresses to source locations
+- **Assembly analysis**: objdump integration for instruction-level debugging  
+- **Stack trace generation**: Complete backtrace with symbol resolution
+- **Library mapping**: dladdr integration for shared library analysis
+
+#### **Production-Ready Exception Model**
+- **Hardware exceptions**: Converted to C++ exceptions for uniform handling
+- **Stack unwinding**: Proper RAII cleanup during exception propagation
+- **User code isolation**: Crash recovery without terminating REPL session
+- **Debug information**: Rich diagnostic output for development
+
+### 4. System Integration
+
+#### **POSIX Compliance and Constraints**
+- **Linux-focused design**: Optimized for POSIX-compliant systems
+- **dlopen/dlsym integration**: Global state requirements properly handled
+- **Shared memory model**: Direct integration with user-compiled code
+- **Signal handling**: POSIX signal semantics with custom handlers
+
+#### **Build System Integration**
+- **Ninja build system**: Complete integration with parallel compilation
+- **CMake support**: Modern build configuration
+- **Clang toolchain**: Full LLVM/Clang integration for compilation and analysis
+
 ## Design Patterns and Modern C++ Implementation
 
 ### 1. Error Handling Transformation

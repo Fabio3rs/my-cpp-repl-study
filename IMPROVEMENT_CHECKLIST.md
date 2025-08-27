@@ -78,7 +78,63 @@ The refactoring has successfully transformed a monolithic 2,119-line prototype i
 
 **Implementation Location**: `utility/`, `include/utility/`
 
-### 4. **Modern C++ Patterns Implementation** ✅ **COMPLETE**
+### 4. **Main Program Features and System Capabilities** ✅ **COMPLETE**
+
+#### **Operating Modes** ✅ **COMPLETE**
+- [x] **Interactive Mode**: Standard REPL behavior with live compilation
+- [x] **Batch Run Mode (-r flag)**: Execute commands from file for automation
+- [x] **Signal Handler Mode (-s flag)**: Robust error recovery with graceful handling
+
+**Implementation Location**: `main.cpp` lines 130-190
+
+#### **Signal Handling System** ✅ **COMPLETE**
+- [x] **SIGSEGV Handler**: Segmentation fault recovery with detailed crash analysis
+- [x] **SIGFPE Handler**: Floating point exception handling with diagnostics  
+- [x] **SIGINT Handler**: Ctrl+C graceful interruption with proper cleanup
+- [x] **Hardware Exception Conversion**: Convert signals to C++ exceptions for uniform handling
+
+**Key Features:**
+```cpp
+// Robust signal handling with detailed diagnostics
+void handle_segv(const segvcatch::hardware_exception_info &info);
+void handle_fpe(const segvcatch::hardware_exception_info &info);
+```
+
+#### **Plugin System** ✅ **COMPLETE** 
+- [x] **#loadprebuilt Command**: Dynamic library loading with type-dependent behavior
+- [x] **Command Registry**: Plugin-style architecture for extensible commands
+- [x] **REPL Command Set**: Complete set of 7+ built-in commands
+- [x] **Dynamic Loading Integration**: Uses dlopen/dlsym for runtime library loading
+
+**Available Commands:**
+```
+#includedir <path>      - Add include directory
+#compilerdefine <def>   - Add compiler definition  
+#lib <name>            - Link library name
+#loadprebuilt <name>   - Load prebuilt library (type-dependent)
+#cpp2 / #cpp1          - Toggle cpp2 mode
+#help                  - List available commands
+```
+
+#### **Batch Processing Capabilities** ✅ **COMPLETE**
+- [x] **File-Based Execution**: Read and execute REPL commands from files
+- [x] **Exception Handling**: Comprehensive error recovery during batch processing
+- [x] **Assembly Analysis**: Detailed crash diagnostics with instruction-level debugging
+- [x] **Graceful Termination**: Proper cleanup on errors or completion
+
+**Batch Mode Features:**
+```cpp
+// Execute commands from file with robust error handling
+case 'r': {
+    std::string_view replCmdsFile(optarg);
+    // Line-by-line processing with exception handling
+    while (std::getline(file, line)) {
+        if (!extExecRepl(line)) break;
+    }
+}
+```
+
+### 5. **Modern C++ Patterns Implementation** ✅ **COMPLETE**
 
 #### **Error Handling Modernization** ✅ **COMPLETE**
 - [x] **Unified System**: `CompilerResult<T>` template replacing mixed error patterns
@@ -98,7 +154,7 @@ The refactoring has successfully transformed a monolithic 2,119-line prototype i
 - [x] **Performance**: Better performance than stream-based formatting
 - [x] **Readability**: Cleaner, more maintainable string construction
 
-### 5. **Comprehensive Testing Framework** ✅ **COMPLETE (1,350 lines)**
+### 6. **Comprehensive Testing Framework** ✅ **COMPLETE (1,350 lines)**
 
 #### **Test Infrastructure** ✅ **COMPLETE**
 - [x] **GoogleTest Integration**: Professional testing framework with test discovery
