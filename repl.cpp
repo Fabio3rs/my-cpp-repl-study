@@ -38,15 +38,99 @@
 #include <unordered_set>
 #include <utility>
 
-std::unordered_set<std::string> linkLibraries;
-std::unordered_set<std::string> includeDirectories;
-std::unordered_set<std::string> preprocessorDefinitions;
+struct BuildSettings {
+    std::unordered_set<std::string> linkLibraries;
+    std::unordered_set<std::string> includeDirectories;
+    std::unordered_set<std::string> preprocessorDefinitions;
+};
+
+static BuildSettings buildSettings;
+
+// Forward declaration for command handler usage
+bool loadPrebuilt(const std::string &path);
+
+#include "commands/command_registry.hpp"
+
+namespace {
+
+struct ReplCommandContext {
+    BuildSettings *buildSettingsPtr;
+    bool *useCpp2Ptr;
+};
+
+void registerReplCommands() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+
+    commands::registry().registerPrefix(
+        "#includedir ", "Add include directory",
+        [](std::string_view arg, commands::CommandContextBase &base) {
+            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
+            ctx.buildSettingsPtr->includeDirectories.insert(std::string(arg));
+            return true;
+        });
+
+    commands::registry().registerPrefix(
+        "#compilerdefine ", "Add compiler definition",
+        [](std::string_view arg, commands::CommandContextBase &base) {
+            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
+            ctx.buildSettingsPtr->preprocessorDefinitions.insert(std::string(arg));
+            return true;
+        });
+
+    commands::registry().registerPrefix(
+        "#lib ", "Link library name (without lib prefix)",
+        [](std::string_view arg, commands::CommandContextBase &base) {
+            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
+            ctx.buildSettingsPtr->linkLibraries.insert(std::string(arg));
+            return true;
+        });
+
+    commands::registry().registerPrefix(
+        "#loadprebuilt ", "Load prebuilt library",
+        [](std::string_view arg, commands::CommandContextBase &) {
+            return loadPrebuilt(std::string(arg));
+        });
+
+    commands::registry().registerPrefix(
+        "#cpp2", "Enable cpp2 mode",
+        [](std::string_view, commands::CommandContextBase &base) {
+            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
+            *(ctx.useCpp2Ptr) = true;
+            return true;
+        });
+
+    commands::registry().registerPrefix(
+        "#cpp1", "Disable cpp2 mode",
+        [](std::string_view, commands::CommandContextBase &base) {
+            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
+            *(ctx.useCpp2Ptr) = false;
+            return true;
+        });
+
+    commands::registry().registerPrefix(
+        "#help", "List available commands",
+        [](std::string_view, commands::CommandContextBase &) {
+            const auto &es = commands::registry().entries();
+            for (const auto &e : es) {
+                std::cout << e.prefix << " - " << e.description << std::endl;
+            }
+            return true;
+        });
+}
+
+bool handleReplCommand(std::string_view line, BuildSettings &bs, bool &useCpp2) {
+    registerReplCommands();
+    ReplCommandContext rc{.buildSettingsPtr = &bs, .useCpp2Ptr = &useCpp2};
+    return commands::handleCommand(line, rc);
+}
+
+} // namespace
 
 std::unordered_map<std::string, EvalResult> evalResults;
 
-void addIncludeDirectory(const std::string &dir) {
-    includeDirectories.insert(dir);
-}
+void addIncludeDirectory(const std::string &dir) { buildSettings.includeDirectories.insert(dir); }
 
 auto getLinkLibraries() -> std::unordered_set<std::string> {
     std::unordered_set<std::string> linkLibraries;
@@ -68,7 +152,7 @@ auto getLinkLibrariesStr() -> std::string {
 
     linkLibrariesStr += " -L./ ";
 
-    for (const auto &lib : linkLibraries) {
+    for (const auto &lib : buildSettings.linkLibraries) {
         linkLibrariesStr += " -l" + lib;
     }
 
@@ -78,7 +162,7 @@ auto getLinkLibrariesStr() -> std::string {
 auto getIncludeDirectoriesStr() -> std::string {
     std::string includeDirectoriesStr;
 
-    for (const auto &dir : includeDirectories) {
+    for (const auto &dir : buildSettings.includeDirectories) {
         includeDirectoriesStr += " -I" + dir;
     }
 
@@ -88,7 +172,7 @@ auto getIncludeDirectoriesStr() -> std::string {
 auto getPreprocessorDefinitionsStr() -> std::string {
     std::string preprocessorDefinitionsStr;
 
-    for (const auto &def : preprocessorDefinitions) {
+    for (const auto &def : buildSettings.preprocessorDefinitions) {
         preprocessorDefinitionsStr += " -D" + def;
     }
 
@@ -1686,17 +1770,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return false;
     }
 
-    if (line.starts_with("#includedir ")) {
-        line = line.substr(12);
-
-        includeDirectories.insert(line);
-        return true;
-    }
-
-    if (line.starts_with("#compilerdefine ")) {
-        line = line.substr(16);
-
-        preprocessorDefinitions.insert(line);
+    if (handleReplCommand(line, buildSettings, useCpp2)) {
         return true;
     }
 
@@ -1752,29 +1826,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
-    if (line.starts_with("#lib ")) {
-        line = line.substr(5);
-
-        linkLibraries.insert(line);
-        return true;
-    }
-
-    if (line.starts_with("#loadprebuilt ")) {
-        line = line.substr(14);
-
-        loadPrebuilt(line);
-        return true;
-    }
-
-    if (line.starts_with("#cpp2")) {
-        useCpp2 = true;
-        return true;
-    }
-
-    if (line.starts_with("#cpp1")) {
-        useCpp2 = false;
-        return true;
-    }
+    // command parsing handled above
 
     if (varsNames.contains(line)) {
         auto it = varPrinterAddresses.find(line);
