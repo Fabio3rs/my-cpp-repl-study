@@ -362,52 +362,66 @@ auto analyzeCustomCommands(
     -> std::pair<std::vector<VarDecl>, int> {
     std::pair<std::vector<VarDecl>, int> resultc;
 
-    std::for_each(
-        std::execution::par_unseq, commands.begin(), commands.end(),
-        [&](const auto &namecmd) {
-            if (namecmd.first.empty()) {
-                return;
-            }
-            const auto path = std::filesystem::path(namecmd.first);
-            std::string purefilename = path.filename().string();
+    // Garante que o CompilerService está inicializado
+    initCompilerService();
 
-            purefilename =
-                purefilename.substr(0, purefilename.find_last_of('.'));
+    // Converte o mapa de comandos para um vetor de comandos formatados
+    std::vector<std::string> formattedCommands;
 
-            std::string logname = purefilename + ".log";
-            std::string cmd = namecmd.second;
+    for (const auto &namecmd : commands) {
+        if (namecmd.first.empty()) {
+            continue;
+        }
 
-            if ((namecmd.second.find("-std=gnu++20") != std::string::npos ||
-                 namecmd.second.find("-std=") == std::string::npos) &&
-                namecmd.second.find("-fvisibility=hidden") ==
-                    std::string::npos) {
-                cmd += " -std=gnu++20 -include "
-                       "precompiledheader.hpp";
-            }
+        const auto path = std::filesystem::path(namecmd.first);
+        std::string purefilename = path.filename().string();
+        purefilename = purefilename.substr(0, purefilename.find_last_of('.'));
 
-            cmd += " -Xclang -ast-dump=json  -fsyntax-only "
-                   " 2>" +
-                   logname;
+        std::string logname = purefilename + ".log";
+        std::string cmd = namecmd.second;
 
-            auto out = runProgramGetOutput(cmd);
+        // Adiciona flags padrão se necessário
+        if ((namecmd.second.find("-std=gnu++20") != std::string::npos ||
+             namecmd.second.find("-std=") == std::string::npos) &&
+            namecmd.second.find("-fvisibility=hidden") == std::string::npos) {
+            cmd += " -std=gnu++20 -include precompiledheader.hpp";
+        }
 
-            if (out.second != 0) {
-                std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
-                          << " " << cmd << std::endl;
-                std::fstream file(logname, std::ios::in);
+        // Adiciona flags para análise AST e redirecionamento para JSON
+        std::string jsonFile = purefilename + "_ast.json";
+        cmd += " -Xclang -ast-dump=json -fsyntax-only";
+        cmd += " 2>" + logname + " > " + jsonFile;
 
-                std::copy(std::istreambuf_iterator<char>(file),
-                          std::istreambuf_iterator<char>(),
-                          std::ostreambuf_iterator<char>(std::cerr));
-                resultc.second = out.second;
-                return;
-            }
+        formattedCommands.push_back(cmd);
+    }
 
-            analysis::ClangAstAnalyzerAdapter analyzer;
-            simdjson::padded_string_view json(out.first);
-            analyzer.analyzeJson(json, namecmd.first, resultc.first);
-        });
+    // Usa o CompilerService para analisar os comandos
+    auto result = compilerService->analyzeCustomCommands(formattedCommands);
 
+    if (!result.success()) {
+        std::cerr << "Erro na análise customizada usando CompilerService"
+                  << std::endl;
+        resultc.second = 1;
+        return resultc;
+    }
+
+    // Converte as strings encontradas em VarDecls
+    // (Nota: As variáveis já foram mescladas pelo callback mergeVars)
+    // Aqui só precisamos definir o código de retorno
+    resultc.second = 0;
+
+    // Como o callback já foi chamado, as variáveis já estão em
+    // replState.allTheVariables Mas vamos retornar as que foram encontradas
+    // nesta análise específica
+    std::vector<VarDecl> foundVars;
+    for (const auto &varName : result.value) {
+        VarDecl decl;
+        decl.name = varName;
+        decl.type = "auto"; // Tipo genérico
+        foundVars.push_back(decl);
+    }
+
+    resultc.first = std::move(foundVars);
     return resultc;
 }
 

@@ -4,12 +4,16 @@
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <execution>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <unistd.h>
@@ -464,6 +468,154 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     result.value.variables = std::move(allVars);
     result.value.returnCode = 0;
 
+    return result;
+}
+
+CompilerResult<std::vector<std::string>> CompilerService::analyzeCustomCommands(
+    const std::vector<std::string> &commands) const {
+
+    CompilerResult<std::vector<std::string>> result;
+
+    // Vetor thread-safe para coletar todas as variáveis
+    std::vector<std::string> allVars;
+    std::mutex varsMutex;
+
+    // Coletor de erros thread-safe
+    std::vector<std::string> errors;
+    std::mutex errorsMutex;
+
+    // Processa os comandos em paralelo
+    std::for_each(
+        std::execution::par_unseq, commands.begin(), commands.end(),
+        [&](const std::string &cmd) {
+            try {
+                // Executa o comando usando executeCommand
+                auto cmdResult = executeCommand(cmd);
+
+                if (!cmdResult.success()) {
+                    std::lock_guard<std::mutex> lock(errorsMutex);
+                    errors.push_back("Erro ao executar comando: " + cmd);
+                    return;
+                }
+
+                // Processa o JSON de saída se o comando contém -ast-dump
+                if (cmd.find("-ast-dump") != std::string::npos) {
+                    // Extrai o arquivo JSON do comando
+                    std::string jsonFile;
+                    size_t jsonPos = cmd.find(" > ");
+                    if (jsonPos != std::string::npos) {
+                        jsonFile = cmd.substr(jsonPos + 3);
+                        // Remove espaços e quebras de linha
+                        jsonFile.erase(jsonFile.find_last_not_of(" \n\r\t") +
+                                       1);
+                    }
+
+                    if (!jsonFile.empty()) {
+                        // Usa simdjson para analisar o arquivo
+                        std::ifstream file(jsonFile);
+                        if (file.is_open()) {
+                            std::string content(
+                                (std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+
+                            // Análise com simdjson (similar ao código original)
+                            simdjson::dom::parser parser;
+                            simdjson::dom::element doc;
+                            auto error = parser.parse(content).get(doc);
+
+                            if (!error) {
+                                // Função recursiva para extrair declarações
+                                std::function<void(simdjson::dom::element)>
+                                    extractDecls;
+                                std::vector<std::string> localVars;
+
+                                extractDecls =
+                                    [&](simdjson::dom::element node) {
+                                        if (node.is_object()) {
+                                            simdjson::dom::object obj = node;
+
+                                            // Verifica se é uma declaração de
+                                            // variável/função
+                                            auto kind = obj["kind"];
+                                            auto name = obj["name"];
+
+                                            if (!kind.error() &&
+                                                !name.error()) {
+                                                std::string_view kindStr = kind;
+                                                std::string_view nameStr = name;
+
+                                                if (kindStr == "VarDecl" ||
+                                                    kindStr == "FunctionDecl" ||
+                                                    kindStr ==
+                                                        "CXXMethodDecl" ||
+                                                    kindStr == "FieldDecl") {
+                                                    localVars.push_back(
+                                                        std::string(nameStr));
+                                                }
+                                            }
+
+                                            // Processa filhos recursivamente
+                                            auto inner = obj["inner"];
+                                            if (!inner.error() &&
+                                                inner.is_array()) {
+                                                for (auto child : inner) {
+                                                    extractDecls(child);
+                                                }
+                                            }
+                                        }
+                                    };
+
+                                extractDecls(doc);
+
+                                // Adiciona variáveis encontradas ao resultado
+                                if (!localVars.empty()) {
+                                    std::lock_guard<std::mutex> lock(varsMutex);
+                                    allVars.insert(allVars.end(),
+                                                   localVars.begin(),
+                                                   localVars.end());
+                                }
+                            } else {
+                                std::lock_guard<std::mutex> lock(errorsMutex);
+                                errors.push_back("Erro ao analisar JSON: " +
+                                                 jsonFile);
+                            }
+                        }
+                    }
+                }
+
+            } catch (const std::exception &e) {
+                std::lock_guard<std::mutex> lock(errorsMutex);
+                errors.push_back("Exceção durante análise: " +
+                                 std::string(e.what()));
+            }
+        });
+
+    // Verifica se houve erros
+    if (!errors.empty()) {
+        result.error = CompilerError::SystemCommandFailed;
+        return result;
+    }
+
+    // Remove duplicatas
+    std::sort(allVars.begin(), allVars.end());
+    allVars.erase(std::unique(allVars.begin(), allVars.end()), allVars.end());
+
+    // Chama callback se definido
+    if (varMergeCallback_ && !allVars.empty()) {
+        // Converte std::string para VarDecl para usar o callback
+        std::vector<VarDecl> varDecls;
+        for (const auto &var : allVars) {
+            VarDecl decl;
+            decl.name = var;
+            decl.type =
+                "auto"; // Tipo genérico já que não temos informação do tipo
+            varDecls.push_back(decl);
+        }
+        varMergeCallback_(varDecls);
+    }
+
+    result.error = CompilerError::Success;
+    result.value = std::move(allVars);
     return result;
 }
 

@@ -178,6 +178,20 @@ class CompilerService {
         const std::string &compiler, const std::string &libname,
         const std::vector<std::string> &sources, const std::string &std) const;
 
+    /**
+     * @brief Analyze custom compilation commands with parallel processing
+     *
+     * Equivalent to the original analyzeCustomCommands() function.
+     * Processes multiple compilation commands in parallel and extracts AST
+     * data.
+     *
+     * @param commands List of compilation commands to analyze
+     * @return CompilerResult<std::vector<std::string>> - List of variables
+     * found or error
+     */
+    CompilerResult<std::vector<std::string>>
+    analyzeCustomCommands(const std::vector<std::string> &commands) const;
+
     // === Helper Operations ===
 
     /**
