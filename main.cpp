@@ -13,6 +13,8 @@
 #include <ucontext.h>
 #include <unistd.h>
 
+#include "utility/file_raii.hpp"
+
 using namespace std;
 
 void handle_segv(const segvcatch::hardware_exception_info &info) {
@@ -52,15 +54,14 @@ void segfaultHandler(int sig) {
     char buf[1024];
     snprintf(buf, sizeof(buf), "addr2line -e %s %p", info.dli_fname,
              (void *)((char *)addr - (char *)info.dli_fbase));
-    FILE *fp = popen(buf, "r");
+    auto fp = utility::make_popen(buf, "r");
     if (fp) {
         char *line = nullptr;
         size_t len = 0;
         ssize_t read;
-        while ((read = getline(&line, &len, fp)) != -1) {
+        while ((read = getline(&line, &len, fp.get())) != -1) {
             message += line;
         }
-        pclose(fp);
     }
 
     // printf("addr: %p  base: %p %d %p\n", addr, info.dli_fbase, getpid(),
@@ -77,15 +78,14 @@ void segfaultHandler(int sig) {
              "objdump -d %s -j .text -l --start-address=%p --stop-address=%p",
              info.dli_fname, (void *)((char *)addr - (char *)info.dli_fbase),
              (void *)((char *)addr - (char *)info.dli_fbase + 1));
-    FILE *fp2 = popen(instr, "r");
+    auto fp2 = utility::make_popen(instr, "r");
     if (fp2) {
         char *line = nullptr;
         size_t len = 0;
         ssize_t read;
-        while ((read = getline(&line, &len, fp2)) != -1) {
+        while ((read = getline(&line, &len, fp2.get())) != -1) {
             message += line;
         }
-        pclose(fp2);
     }
 
     class uniqueptr_free {

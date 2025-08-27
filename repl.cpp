@@ -10,6 +10,7 @@
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
+#include "utility/file_raii.hpp"
 #include "utility/library_introspection.hpp"
 #include "utility/quote.hpp"
 #include <algorithm>
@@ -171,7 +172,7 @@ static std::mutex varsWriteMutex;
 auto runProgramGetOutput(std::string_view cmd) {
     std::pair<std::string, int> result{{}, -1};
 
-    FILE *pipe = popen(cmd.data(), "r");
+    auto pipe = utility::make_popen(cmd.data(), "r");
 
     if (!pipe) {
         std::cerr << "popen() failed!" << std::endl;
@@ -184,16 +185,16 @@ auto runProgramGetOutput(std::string_view cmd) {
     try {
         buffer.resize(MBPAGE2);
     } catch (const std::bad_alloc &e) {
-        pclose(pipe);
+        pipe.reset();
         std::cerr << "bad_alloc caught: " << e.what() << std::endl;
         return result;
     }
 
     size_t finalSize = 0;
 
-    while (!feof(pipe)) {
+    while (!feof(pipe.get())) {
         size_t read = fread(buffer.data() + finalSize, 1,
-                            buffer.size() - finalSize, pipe);
+                            buffer.size() - finalSize, pipe.get());
 
         if (read < 0) {
             std::cerr << "fread() failed!" << std::endl;
@@ -212,7 +213,8 @@ auto runProgramGetOutput(std::string_view cmd) {
         }
     }
 
-    result.second = pclose(pipe);
+    pipe.reset();
+    result.second = pipe.get_deleter().retcode;
 
     if (result.second != 0) {
         std::cerr << std::format("program failed! {}\n", result.second);
@@ -443,10 +445,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -493,14 +496,14 @@ auto get_library_start_address(const char *library_name) -> uintptr_t {
     uintptr_t start_address{}, end_address{};
 
     // Open /proc/self/maps
-    FILE *maps_file = fopen("/proc/self/maps", "r");
-    if (maps_file == NULL) {
+    auto maps_file = utility::make_fopen("/proc/self/maps", "r");
+    if (!maps_file) {
         perror("fopen");
         exit(EXIT_FAILURE);
     }
 
     // Search for the library in memory maps
-    while (fgets(line.data(), MAX_LINE_LENGTH, maps_file) != NULL) {
+    while (fgets(line.data(), MAX_LINE_LENGTH, maps_file.get()) != NULL) {
         library_path.front() = 0;
         line.back() = 0;
         line[strcspn(line.data(), "\n")] = 0;
@@ -523,14 +526,11 @@ auto get_library_start_address(const char *library_name) -> uintptr_t {
         return 0;
     }
 
-    fclose(maps_file);
-
     return start_address;
 }
 
-auto get_symbol_address(const char *library_name,
-                        const char *symbol_name) -> uintptr_t {
-    FILE *maps_file{};
+auto get_symbol_address(const char *library_name, const char *symbol_name)
+    -> uintptr_t {
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
     uintptr_t start_address{}, end_address{};
@@ -538,14 +538,14 @@ auto get_symbol_address(const char *library_name,
     uintptr_t symbol_offset = 0;
 
     // Open /proc/self/maps
-    maps_file = fopen("/proc/self/maps", "r");
-    if (maps_file == NULL) {
+    auto maps_file = utility::make_fopen("/proc/self/maps", "r");
+    if (!maps_file) {
         perror("fopen");
         exit(EXIT_FAILURE);
     }
 
     // Search for the library in memory maps
-    while (fgets(line, MAX_LINE_LENGTH, maps_file) != NULL) {
+    while (fgets(line, MAX_LINE_LENGTH, maps_file.get()) != NULL) {
         *library_path = 0;
         int readed = sscanf(line, "%zx-%zx %*s %*s %*s %*s %s", &start_address,
                             &end_address, library_path);
@@ -569,14 +569,14 @@ auto get_symbol_address(const char *library_name,
     // Get the address of the symbol within the library using nm
     sprintf(command, "nm -D --defined-only %s | grep ' %s$'", library_path,
             symbol_name);
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
+    auto symbol_address_command = utility::make_popen(command, "r");
+    if (!symbol_address_command) {
         perror("popen");
         exit(EXIT_FAILURE);
     }
 
     // Parse the output of nm command to get the symbol address
-    if (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL) {
+    if (fgets(line, MAX_LINE_LENGTH, symbol_address_command.get()) != NULL) {
         char address[17]; // Assuming address length of 16 characters
         sscanf(line, "%16s", address);
         sscanf(address, "%zx",
@@ -586,10 +586,6 @@ auto get_symbol_address(const char *library_name,
     } else {
         printf("Symbol %s not found in %s.\n", symbol_name, library_name);
     }
-
-    pclose(symbol_address_command);
-
-    fclose(maps_file);
 
     return start_address + symbol_offset;
 }
@@ -894,15 +890,15 @@ void resolveSymbolOffsetsFromLibraryFile(
 
     char command[1024]{};
     sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
+    auto symbol_address_command = utility::make_popen(command, "r");
+    if (!symbol_address_command) {
         perror("popen");
         exit(EXIT_FAILURE);
     }
 
     char line[1024]{};
 
-    while (fgets(line, 1024, symbol_address_command) != NULL) {
+    while (fgets(line, 1024, symbol_address_command.get()) != NULL) {
         uintptr_t symbol_offset = 0;
         char symbol_name[256];
         sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
@@ -911,8 +907,6 @@ void resolveSymbolOffsetsFromLibraryFile(
             symbolsToResolve[symbol_name] = symbol_offset;
         }
     }
-
-    pclose(symbol_address_command);
 }
 
 auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
