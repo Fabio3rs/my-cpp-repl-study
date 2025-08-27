@@ -90,39 +90,6 @@ static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
     return repl_commands::handleReplCommand(line, view);
 }
 
-// moved into replState
-
-auto getLinkLibraries() -> std::unordered_set<std::string> {
-    std::unordered_set<std::string> linkLibraries;
-
-    std::fstream file("linkLibraries.txt", std::ios::in);
-
-    if (file.is_open()) {
-        std::string line;
-        while (std::getline(file, line)) {
-            linkLibraries.insert(line);
-        }
-    }
-
-    return linkLibraries;
-}
-
-void addIncludeDirectory(const std::string &dir) {
-    buildSettings.includeDirectories.insert(dir);
-}
-
-auto getLinkLibrariesStr() -> std::string {
-    return buildSettings.getLinkLibrariesStr();
-}
-
-auto getIncludeDirectoriesStr() -> std::string {
-    return buildSettings.getIncludeDirectoriesStr();
-}
-
-auto getPreprocessorDefinitionsStr() -> std::string {
-    return buildSettings.getPreprocessorDefinitionsStr();
-}
-
 // A classe ClangAstAnalyzerAdapter foi movida para
 // include/analysis/clang_ast_adapter.hpp
 
