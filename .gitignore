@@ -1,0 +1,75 @@
+# Build artifacts and directories
+build/
+ninja/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+
+# Object files and libraries
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.exe
+*.out
+
+# Debug information
+*.dSYM/
+*.su
+*.idb
+
+# Temporary and cache files
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.vcxproj*
+*.sln
+*.user
+*.suo
+*.filters
+*.opensdf
+*.sdf
+*.ipch
+
+# Package manager files
+conan.lock
+conanbuildinfo.*
+vcpkg_installed/
+
+# Testing
+Testing/
+*.gcno
+*.gcda
+*.gcov
+
+# Static analysis
+cppcheck-report.xml
+*.sarif
+
+# Profiling
+*.prof
+gmon.out
+
+# Core dumps
+core.*
