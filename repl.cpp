@@ -3,9 +3,13 @@
 #include "backtraced_exceptions.hpp"
 #include "printerOverloads.hpp"
 
+#include "analysis/ast_analyzer.hpp"
+#include "analysis/ast_context.hpp"
+#include "analysis/clang_ast_adapter.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
+#include "utility/library_introspection.hpp"
 #include "utility/quote.hpp"
 #include <algorithm>
 #include <cassert>
@@ -46,84 +50,24 @@ std::any lastReplResult; // used for external commands
 // Forward declaration for command handler usage
 bool loadPrebuilt(const std::string &path);
 
+// Forward declaration for functions that still exist
+void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars);
+
+// Forward declaration of adapter
+// Adapter defined below
+
 #include "commands/command_registry.hpp"
+#include "commands/repl_commands.hpp"
 
-namespace {
-
-struct ReplCommandContext {
-    BuildSettings *buildSettingsPtr;
-    bool *useCpp2Ptr;
-};
-
-void registerReplCommands() {
-    static bool done = false;
-    if (done) return;
-    done = true;
-
-    commands::registry().registerPrefix(
-        "#includedir ", "Add include directory",
-        [](std::string_view arg, commands::CommandContextBase &base) {
-            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
-            ctx.buildSettingsPtr->includeDirectories.insert(std::string(arg));
-            return true;
-        });
-
-    commands::registry().registerPrefix(
-        "#compilerdefine ", "Add compiler definition",
-        [](std::string_view arg, commands::CommandContextBase &base) {
-            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
-            ctx.buildSettingsPtr->preprocessorDefinitions.insert(std::string(arg));
-            return true;
-        });
-
-    commands::registry().registerPrefix(
-        "#lib ", "Link library name (without lib prefix)",
-        [](std::string_view arg, commands::CommandContextBase &base) {
-            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
-            ctx.buildSettingsPtr->linkLibraries.insert(std::string(arg));
-            return true;
-        });
-
-    commands::registry().registerPrefix(
-        "#loadprebuilt ", "Load prebuilt library",
-        [](std::string_view arg, commands::CommandContextBase &) {
-            return loadPrebuilt(std::string(arg));
-        });
-
-    commands::registry().registerPrefix(
-        "#cpp2", "Enable cpp2 mode",
-        [](std::string_view, commands::CommandContextBase &base) {
-            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
-            *(ctx.useCpp2Ptr) = true;
-            return true;
-        });
-
-    commands::registry().registerPrefix(
-        "#cpp1", "Disable cpp2 mode",
-        [](std::string_view, commands::CommandContextBase &base) {
-            auto &ctx = static_cast<commands::BasicContext<ReplCommandContext>&>(base).data;
-            *(ctx.useCpp2Ptr) = false;
-            return true;
-        });
-
-    commands::registry().registerPrefix(
-        "#help", "List available commands",
-        [](std::string_view, commands::CommandContextBase &) {
-            const auto &es = commands::registry().entries();
-            for (const auto &e : es) {
-                std::cout << e.prefix << " - " << e.description << std::endl;
-            }
-            return true;
-        });
+static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
+                                     bool &useCpp2) {
+    repl_commands::ReplCtxView view{
+        .includeDirectories = &bs.includeDirectories,
+        .preprocessorDefinitions = &bs.preprocessorDefinitions,
+        .linkLibraries = &bs.linkLibraries,
+        .useCpp2Ptr = &useCpp2};
+    return repl_commands::handleReplCommand(line, view);
 }
-
-bool handleReplCommand(std::string_view line, BuildSettings &bs, bool &useCpp2) {
-    registerReplCommands();
-    ReplCommandContext rc{.buildSettingsPtr = &bs, .useCpp2Ptr = &useCpp2};
-    return commands::handleCommand(line, rc);
-}
-
-} // namespace
 
 // moved into replState
 
@@ -142,7 +86,9 @@ auto getLinkLibraries() -> std::unordered_set<std::string> {
     return linkLibraries;
 }
 
-void addIncludeDirectory(const std::string &dir) { buildSettings.includeDirectories.insert(dir); }
+void addIncludeDirectory(const std::string &dir) {
+    buildSettings.includeDirectories.insert(dir);
+}
 
 auto getLinkLibrariesStr() -> std::string {
     return buildSettings.getLinkLibrariesStr();
@@ -155,6 +101,9 @@ auto getIncludeDirectoriesStr() -> std::string {
 auto getPreprocessorDefinitionsStr() -> std::string {
     return buildSettings.getPreprocessorDefinitionsStr();
 }
+
+// A classe ClangAstAnalyzerAdapter foi movida para
+// include/analysis/clang_ast_adapter.hpp
 
 int onlyBuildLib(std::string compiler, const std::string &name,
                  std::string ext = ".cpp", std::string std = "gnu++20") {
@@ -206,321 +155,62 @@ int buildLibAndDumpAST(std::string compiler, const std::string &name,
           " -o "
           "lib" +
           name + ".so > " + name + ".json";
-    return system(cmd.c_str());
+    int sysres = system(cmd.c_str());
+    if (sysres != 0) {
+        return sysres;
+    }
+
+    analysis::ClangAstAnalyzerAdapter analyzer;
+    std::vector<VarDecl> vars;
+    int ares = analyzer.analyzeFile(name + ".json", name + ".cpp", vars);
+    if (ares != 0) {
+        return ares;
+    }
+
+    // merge todasVars with vars
+    for (const auto &var : vars) {
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
+        }
+    }
+
+    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
+          getIncludeDirectoriesStr() +
+          " -std=gnu++20 -shared -include precompiledheader.hpp -g "
+          "-Wl,--export-dynamic -fPIC " +
+          name + ".cpp " + getLinkLibrariesStr() +
+          " -o "
+          "lib" +
+          name + ".so";
+    std::cout << cmd << std::endl;
+    int buildres2 = system(cmd.c_str());
+
+    if (buildres2 != 0) {
+        std::cerr << "buildres != 0: " << cmd << std::endl;
+        return buildres2;
+    }
+
+    savePrintAllVarsLibrary(vars);
+
+    // merge todasVars with vars
+    for (const auto &var : vars) {
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
+        }
+    }
+
+    return 0;
 }
 
-std::string outputHeader;
-std::unordered_set<std::string> includedFiles;
+// Removidas as variáveis globais outputHeader e includedFiles
+// Agora encapsuladas na classe AstContext
 
 static std::mutex varsWriteMutex;
 
-void analyzeInnerAST(
-    std::filesystem::path source, std::vector<VarDecl> &vars,
-    simdjson::simdjson_result<simdjson::ondemand::value> inner) {
-    std::filesystem::path lastfile;
-
-    if (inner.error() != simdjson::SUCCESS) {
-        std::cout << "inner is not an object" << std::endl;
-        return;
-    }
-
-    auto inner_type = inner.type();
-    if (inner_type.error() != simdjson::SUCCESS ||
-        inner_type.value() != simdjson::ondemand::json_type::array) {
-        std::cout << "inner is not an array" << std::endl;
-    }
-
-    auto inner_array = inner.get_array();
-
-    int64_t lastLine = 0;
-    int64_t lastColumn = 0;
-
-    for (auto element : inner_array) {
-        auto loc = element["loc"];
-
-        if (loc.error()) {
-            continue;
-        }
-
-        auto lfile = loc["file"];
-
-        if (!lfile.error()) {
-            simdjson::simdjson_result<std::string_view> lfile_string =
-                lfile.get_string();
-
-            if (!lfile_string.error()) {
-                lastfile = lfile_string.value();
-            }
-        }
-
-        auto includedFrom = loc["includedFrom"];
-
-        if (!includedFrom.error()) {
-            auto includedFrom_string = includedFrom["file"].get_string();
-
-            if (!includedFrom_string.error()) {
-                std::filesystem::path p(lastfile);
-
-                try {
-                    p = std::filesystem::absolute(
-                        std::filesystem::canonical(p));
-                } catch (...) {
-                }
-
-                std::string path = p.string();
-
-                if (!path.empty() && !path.ends_with(".cpp") &&
-                    !path.ends_with(".cc") &&
-                    p.filename() != "decl_amalgama.hpp" &&
-                    p.filename() != "printerOutput.hpp" &&
-                    includedFrom_string.value() == source &&
-                    includedFiles.find(path) == includedFiles.end()) {
-                    includedFiles.insert(path);
-                    outputHeader += "#include \"" + path + "\"\n";
-                }
-            }
-        }
-
-        std::error_code ec;
-        if (!source.empty() && !lastfile.empty() &&
-            !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
-            try {
-                auto canonical = std::filesystem::canonical(lastfile);
-
-                auto current =
-                    std::filesystem::canonical(std::filesystem::current_path());
-
-                if (!canonical.string().starts_with(current.string())) {
-                    continue;
-                }
-            } catch (const std::exception &e) {
-                std::cerr << e.what() << std::endl;
-                continue;
-            } catch (...) {
-                continue;
-            }
-        }
-
-        try {
-            lastColumn = loc["col"].value();
-        } catch (...) {
-            lastColumn = 0; // Default to 0 if column is not available
-        }
-
-        auto lline = loc["line"];
-
-        if (lline.error()) {
-            auto spellingLoc = loc["spellingLoc"];
-
-            if (spellingLoc.error()) {
-                if (lastLine <= 0) {
-                    continue; // Skip if no valid line information
-                }
-            } else {
-                lline = spellingLoc["line"];
-
-                if (lline.error()) {
-                    continue;
-                }
-
-                loc = spellingLoc;
-            }
-        }
-
-        auto lline_int = lline.get_int64();
-
-        if (lline_int.error()) {
-            if (lastLine <= 0) {
-                continue; // Skip if no valid line information
-            }
-
-            // Keep the last line if parsing fails
-        } else {
-            lastLine = lline_int.value();
-        }
-
-        auto kind = element["kind"];
-
-        if (kind.error()) {
-            continue;
-        }
-
-        auto kind_string = kind.get_string();
-
-        if (kind_string.error()) {
-            continue;
-        }
-
-        auto name = element["name"];
-
-        if (name.error()) {
-            continue;
-        }
-
-        auto name_string = name.get_string();
-
-        if (name_string.error()) {
-            continue;
-        }
-
-        if (kind_string.error() == simdjson::SUCCESS &&
-            kind_string.value() == "CXXRecordDecl" &&
-            element["inner"].error() == simdjson::SUCCESS) {
-            assert(element["inner"].type() ==
-                   simdjson::ondemand::json_type::array);
-            analyzeInnerAST(source, vars, element["inner"]);
-            continue;
-        }
-
-        auto type = element["type"];
-
-        if (type.error()) {
-            continue;
-        }
-
-        auto qualType = type["qualType"];
-
-        if (qualType.error()) {
-            continue;
-        }
-
-        auto qualType_string = qualType.get_string();
-
-        if (qualType_string.error()) {
-            continue;
-        }
-
-        auto storageClassJs = element["storageClass"];
-
-        std::string storageClass(
-            storageClassJs.error() ? "" : storageClassJs.get_string().value());
-
-        if (storageClass == "extern" || storageClass == "static") {
-            continue;
-        }
-
-        if (kind_string.value() == "FunctionDecl" ||
-            kind_string.value() == "CXXMethodDecl") {
-            std::scoped_lock<std::mutex> lck(varsWriteMutex);
-
-            if (kind_string.value() != "CXXMethodDecl") {
-                auto qualTypestr = std::string(qualType_string.value());
-
-                auto parem = qualTypestr.find_first_of('(');
-
-                if (parem == std::string::npos) {
-                    continue;
-                }
-
-                qualTypestr.insert(parem, std::string(name_string.value()));
-
-                std::cout << "extern " << qualTypestr << ";" << std::endl;
-
-                outputHeader += "extern " + qualTypestr + ";\n";
-            }
-
-            auto mangledName = element["mangledName"];
-
-            if (mangledName.error()) {
-                continue;
-            }
-
-            VarDecl var;
-
-            var.name = name_string.value();
-            var.type = "";
-            var.qualType = qualType_string.value();
-            var.kind = kind_string.value();
-            var.file = lastfile;
-            var.line = lastLine;
-            var.mangledName = mangledName.get_string().value();
-
-            vars.push_back(std::move(var));
-        } else if (kind_string.value() == "VarDecl") {
-            std::scoped_lock<std::mutex> lck(varsWriteMutex);
-            outputHeader += "#line " + std::to_string(lastLine) + " \"" +
-                            lastfile.string() + "\"\n";
-
-            std::string typenamestr = std::string(qualType_string.value());
-
-            if (auto bracket = typenamestr.find_first_of('[');
-                bracket != std::string::npos) {
-                typenamestr.insert(bracket,
-                                   " " + std::string(name_string.value()));
-            } else {
-                typenamestr += " " + std::string(name_string.value());
-            }
-
-            outputHeader += "extern " + typenamestr + ";\n";
-
-            VarDecl var;
-
-            auto type_var = type["desugaredQualType"];
-
-            var.name = name_string.value();
-            var.type = type_var.error() ? "" : type_var.get_string().value();
-            var.qualType = qualType_string.value();
-            var.kind = kind_string.value();
-            var.file = lastfile;
-            var.line = lastLine;
-
-            vars.push_back(std::move(var));
-        }
-    }
-}
-
-int analyzeASTFromJsonString(simdjson::padded_string_view json,
-                             const std::string &source,
-                             std::vector<VarDecl> &vars) {
-    {
-        std::fstream debugOutput("debug_output.json",
-                                 std::ios::out | std::ios::trunc);
-        debugOutput << json << std::endl;
-    }
-    simdjson::ondemand::parser parser;
-    simdjson::ondemand::document doc;
-    auto error = parser.iterate(json).get(doc);
-    if (error) {
-        std::cout << error << std::endl;
-        return EXIT_FAILURE;
-    }
-    simdjson::ondemand::json_type type;
-    error = doc.type().get(type);
-    if (error) {
-        std::cout << error << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    auto outputHeaderSize = outputHeader.size();
-
-    auto inner = doc["inner"];
-
-    analyzeInnerAST(source, vars, inner);
-
-    if (outputHeaderSize != outputHeader.size()) {
-        std::fstream headerOutput("decl_amalgama.hpp", std::ios::out);
-        headerOutput << outputHeader << std::endl;
-        headerOutput.close();
-    }
-
-    return EXIT_SUCCESS;
-}
-
-int analyzeASTFile(const std::string &filename, const std::string &source,
-                   std::vector<VarDecl> &vars) {
-    simdjson::padded_string json;
-    std::cout << "loading: " << filename << std::endl;
-    auto error = simdjson::padded_string::load(filename).get(json);
-    if (error) {
-        std::cout << "could not load the file " << filename << std::endl;
-        std::cout << "error code: " << error << std::endl;
-        return EXIT_FAILURE;
-    } else {
-        std::cout << "loaded: " << json.size() << " bytes." << std::endl;
-    }
-
-    return analyzeASTFromJsonString(json, source, vars);
-}
+// Funções analyzeInnerAST, analyzeASTFromJsonString e analyzeASTFile
+// foram movidas para analysis::ContextualAstAnalyzer
 
 auto runProgramGetOutput(std::string_view cmd) {
     std::pair<std::string, int> result{{}, -1};
@@ -577,7 +267,9 @@ auto runProgramGetOutput(std::string_view cmd) {
     return result;
 }
 
-int build_precompiledheader(std::string compiler = "clang++") {
+int build_precompiledheader(
+    std::string compiler = "clang++",
+    std::shared_ptr<analysis::AstContext> context = nullptr) {
     std::fstream precompHeader("precompiledheader.hpp",
                                std::ios::out | std::ios::trunc);
 
@@ -588,12 +280,9 @@ int build_precompiledheader(std::string compiler = "clang++") {
     precompHeader << "extern std::any lastReplResult;\n";
     precompHeader << "#include \"printerOutput.hpp\"\n\n" << std::endl;
 
-    for (const auto &include : includedFiles) {
-        if (std::filesystem::exists(include)) {
-            precompHeader << "#include \"" << include << "\"\n";
-        } else {
-            precompHeader << "#include <" << include << ">\n";
-        }
+    // Se temos um contexto, usar os includes dele
+    if (context) {
+        precompHeader << context->getOutputHeader() << std::endl;
     }
 
     precompHeader.flush();
@@ -716,8 +405,8 @@ struct wrapperFn {
 std::unordered_map<std::string, wrapperFn> fnNames;
 // moved into replState
 
-auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
-    -> std::vector<VarDecl> {
+auto buildASTWithPrintVarsFn(std::string compiler,
+                             const std::string &name) -> std::vector<VarDecl> {
     auto cmd = compiler + getPreprocessorDefinitionsStr() + " " +
                getIncludeDirectoriesStr() +
                " -std=gnu++20 -fPIC -Xclang -ast-dump=json -include "
@@ -734,7 +423,13 @@ auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
 
     std::vector<VarDecl> vars;
 
-    analyzeASTFile(name + ".json", name + ".cpp", vars);
+    // Usar o novo analisador contextual
+    analysis::ClangAstAnalyzerAdapter analyzer;
+    int ares = analyzer.analyzeFile(name + ".json", name + ".cpp", vars);
+    if (ares != 0) {
+        std::cerr << "Failed to analyze AST file" << std::endl;
+        return {};
+    }
 
     cmd = compiler + getPreprocessorDefinitionsStr() + " " +
           getIncludeDirectoriesStr() +
@@ -851,8 +546,9 @@ auto analyzeCustomCommands(
                 return;
             }
 
+            analysis::ClangAstAnalyzerAdapter analyzer;
             simdjson::padded_string_view json(out.first);
-            analyzeASTFromJsonString(json, namecmd.first, resultc.first);
+            analyzer.analyzeJson(json, namecmd.first, resultc.first);
         });
 
     return resultc;
@@ -872,11 +568,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return system(cmd.c_str());
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     std::pair<std::vector<VarDecl>, int> resultc;
 
     std::string includes = getIncludeDirectoriesStr();
@@ -929,8 +624,9 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                     return;
                 }
 
+                analysis::ClangAstAnalyzerAdapter analyzer;
                 simdjson::padded_string_view json(out.first);
-                analyzeASTFromJsonString(json, name, resultc.first);
+                analyzer.analyzeJson(json, name, resultc.first);
             });
 
             try {
@@ -1066,13 +762,13 @@ auto get_library_start_address(const char *library_name) -> uintptr_t {
     return start_address;
 }
 
-auto get_symbol_address(const char *library_name, const char *symbol_name)
-    -> uintptr_t {
+auto get_symbol_address(const char *library_name,
+                        const char *symbol_name) -> uintptr_t {
     FILE *maps_file{};
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
     uintptr_t start_address{}, end_address{};
-    char command[MAX_LINE_LENGTH*2]{};
+    char command[MAX_LINE_LENGTH * 2]{};
     uintptr_t symbol_offset = 0;
 
     // Open /proc/self/maps
@@ -1450,35 +1146,6 @@ void resolveSymbolOffsetsFromLibraryFile(
     pclose(symbol_address_command);
 }
 
-auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
-    std::vector<VarDecl> vars;
-    char command[2048]{}, line[MAX_LINE_LENGTH]{};
-
-    // Get the address of the symbol within the library using nm
-    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parse the output of nm command to get the symbol address
-    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL &&
-           !std::feof(symbol_address_command)) {
-        char address[32]{};
-        char symbol_location[256]{};
-        char symbol_name[512]{};
-        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
-        vars.push_back({.name = symbol_name,
-                        .mangledName = symbol_name,
-                        .kind = "FunctionDecl"});
-    }
-
-    pclose(symbol_address_command);
-
-    return vars;
-}
-
 auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                                  std::vector<VarDecl> &&vars) -> EvalResult {
     std::unordered_map<std::string, std::string> functions;
@@ -1626,7 +1293,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 bool loadPrebuilt(const std::string &path) {
     std::unordered_map<std::string, std::string> functions;
 
-    std::vector<VarDecl> vars = getBuiltFileDecls(path);
+    std::vector<VarDecl> vars = utility::getBuiltFileDecls(path);
 
     auto filename = "lib_" + std::filesystem::path(path).filename().string();
 
@@ -1713,7 +1380,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     auto end = std::chrono::steady_clock::now();
 
     {
-        auto vars2 = getBuiltFileDecls("./lib" + cfg.repl_name + ".so");
+        auto vars2 =
+            utility::getBuiltFileDecls("./lib" + cfg.repl_name + ".so");
 
         // add only if it does not exist
         for (const auto &var : vars2) {
@@ -1769,8 +1437,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
-                    replState.shouldRecompilePrecompiledHeader =
-                        includedFiles.insert(path).second;
+                    // TODO: Implementar recompilação baseada em contexto AST
+                    replState.shouldRecompilePrecompiledHeader = true;
                 }
             } else {
                 std::cout << "File name not found" << std::endl;
@@ -1902,7 +1570,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         cfg.analyze = false;
     }
 
-    if (auto rerun = replState.evalResults.find(line); rerun != replState.evalResults.end()) {
+    if (auto rerun = replState.evalResults.find(line);
+        rerun != replState.evalResults.end()) {
         try {
             if (rerun->second.exec) {
                 std::cout << "Rerunning compiled command" << std::endl;
@@ -2101,14 +1770,13 @@ void initRepl() {
     writeHeaderPrintOverloads();
     build_precompiledheader();
 
-    outputHeader.reserve(1024 * 1024);
-    outputHeader += "#pragma once\n";
-    outputHeader += "#include \"precompiledheader.hpp\"\n";
+    // Criar um contexto AST inicial para inicializar o arquivo
+    // decl_amalgama.hpp
+    auto context = std::make_shared<analysis::AstContext>();
+    context->addDeclaration("#pragma once");
+    context->addDeclaration("#include \"precompiledheader.hpp\"");
 
-    std::fstream printerOutput("decl_amalgama.hpp",
-                               std::ios::out | std::ios::trunc);
-    printerOutput << outputHeader << std::endl;
-    printerOutput.close();
+    context->saveHeaderToFile("decl_amalgama.hpp");
 }
 
 void initNotifications(std::string_view appName) {

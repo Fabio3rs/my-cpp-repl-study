@@ -1,0 +1,40 @@
+#include "../include/utility/library_introspection.hpp"
+#include "../repl.hpp" // Para VarDecl
+
+#include <cstdio>
+#include <cstdlib>
+
+namespace utility {
+
+constexpr int MAX_LINE_LENGTH = 1024;
+
+auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
+    std::vector<VarDecl> vars;
+    char command[2048]{}, line[MAX_LINE_LENGTH]{};
+
+    // Get the address of the symbol within the library using nm
+    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
+    FILE *symbol_address_command = popen(command, "r");
+    if (symbol_address_command == nullptr) {
+        perror("popen");
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse the output of nm command to get the symbol address
+    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != nullptr &&
+           !std::feof(symbol_address_command)) {
+        char address[32]{};
+        char symbol_location[256]{};
+        char symbol_name[512]{};
+        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
+        vars.push_back({.name = symbol_name,
+                        .mangledName = symbol_name,
+                        .kind = "FunctionDecl"});
+    }
+
+    pclose(symbol_address_command);
+
+    return vars;
+}
+
+} // namespace utility
