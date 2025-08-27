@@ -85,6 +85,14 @@ class AstContext {
     bool saveHeaderToFile(const std::string &filename) const;
 
   private:
+    /**
+     * @brief Header de declarações com duração estática
+     *
+     * CRÍTICO: Esta variável NUNCA deve ser limpa durante a execução do REPL
+     * pois é usada para gerar decl_amalgama.hpp com todas as declarações
+     * acumuladas ao longo da sessão. Limpar esta variável quebra a
+     * funcionalidade básica do REPL.
+     */
     static std::string outputHeader_;
     std::unordered_set<std::string> includedFiles_;
     mutable size_t lastHeaderSize_ = 0;

@@ -50,6 +50,7 @@ void AstContext::markFileIncluded(const std::string &filePath) {
 }
 
 bool AstContext::hasHeaderChanged() const {
+    std::scoped_lock<std::mutex> lock(contextWriteMutex);
     bool changed = outputHeader_.size() != lastHeaderSize_;
     lastHeaderSize_ = outputHeader_.size();
     return changed;
@@ -57,7 +58,13 @@ bool AstContext::hasHeaderChanged() const {
 
 void AstContext::clear() {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    // outputHeader_.clear();
+
+    // CRÍTICO: outputHeader_.clear() NÃO deve ser chamado!
+    // O outputHeader_ deve manter duração estática para acumular
+    // todas as declarações durante toda a sessão REPL.
+    // Limpar esta variável quebra a geração do decl_amalgama.hpp
+    // outputHeader_.clear(); // ← NUNCA DESCOMENTE ESTA LINHA!
+
     includedFiles_.clear();
     lastHeaderSize_ = 0;
 }

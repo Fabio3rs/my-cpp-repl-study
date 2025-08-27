@@ -22,6 +22,7 @@ if (GTest_FOUND)
     # Unit tests for AstContext
     add_executable(analysis_tests 
         analysis/test_ast_context.cpp
+        analysis/test_static_duration.cpp
         test_helpers/temp_directory_fixture.hpp
     )
     target_include_directories(analysis_tests PRIVATE ${CMAKE_SOURCE_DIR})
