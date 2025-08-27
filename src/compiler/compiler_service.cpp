@@ -20,8 +20,8 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto
-runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
+extern auto runProgramGetOutput(std::string_view cmd)
+    -> std::pair<std::string, int>;
 
 namespace compiler {
 
@@ -206,15 +206,16 @@ std::string CompilerService::formatErrorLine(const std::string &line) const {
 
 CompilerResult<int> CompilerService::buildLibraryOnly(
     const std::string &compiler, const std::string &name,
-    const std::string &ext, const std::string &std) const {
+    const std::string &ext, const std::string &std,
+    std::string_view extra_args) const {
     std::string includePrecompiledHeader = getPrecompiledHeaderFlag(ext);
 
     auto cmd =
         std::format("{} -std={} -shared {} {} {} -g -Wl,--export-dynamic -fPIC "
-                    "{}{} {} -o lib{}.so",
+                    "{}{} {} {} -o lib{}.so",
                     compiler, std, includePrecompiledHeader,
                     getIncludeDirectoriesStr(), getPreprocessorDefinitionsStr(),
-                    name, ext, getLinkLibrariesStr(), name);
+                    name, ext, getLinkLibrariesStr(), extra_args, name);
 
     return executeCommand(cmd);
 }

@@ -40,6 +40,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 static BuildSettings buildSettings;
 static ReplState replState;
@@ -94,10 +95,12 @@ static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
 // include/analysis/clang_ast_adapter.hpp
 
 int onlyBuildLib(std::string compiler, const std::string &name,
-                 std::string ext = ".cpp", std::string std = "gnu++20") {
+                 std::string ext = ".cpp", std::string std = "gnu++20",
+                 std::string_view extra_args = {}) {
     initCompilerService();
 
-    auto result = compilerService->buildLibraryOnly(compiler, name, ext, std);
+    auto result =
+        compilerService->buildLibraryOnly(compiler, name, ext, std, extra_args);
 
     if (!result) {
         std::cerr << std::format("Build failed with error code: {}\n",
@@ -690,7 +693,7 @@ void prepareFunctionWrapper(
         wrapperOutput << wrapper << std::endl;
         wrapperOutput.close();
 
-        onlyBuildLib("clang++", wrappername);
+        onlyBuildLib("clang++", wrappername, ".cpp", "gnu++20", "-nostdlib");
     }
 }
 
@@ -938,6 +941,15 @@ bool loadPrebuilt(const std::string &path) {
     std::unordered_map<std::string, std::string> functions;
 
     std::vector<VarDecl> vars = utility::getBuiltFileDecls(path);
+
+    vars.erase(std::remove_if(vars.begin(), vars.end(),
+                              [](const VarDecl &var) {
+                                  return (var.name == "_init" ||
+                                          var.name == "_fini") ||
+                                         (var.mangledName == "_init" ||
+                                          var.mangledName == "_fini");
+                              }),
+               vars.end());
 
     auto filename = "lib_" + std::filesystem::path(path).filename().string();
 

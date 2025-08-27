@@ -117,7 +117,8 @@ class CompilerService {
     CompilerResult<int>
     buildLibraryOnly(const std::string &compiler, const std::string &name,
                      const std::string &ext = ".cpp",
-                     const std::string &std = "gnu++20") const;
+                     const std::string &std = "gnu++20",
+                     std::string_view extra_args = {}) const;
 
     /**
      * @brief Build library with full AST analysis and variable extraction

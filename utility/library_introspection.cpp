@@ -19,7 +19,7 @@ auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
     char line[MAX_LINE_LENGTH]{};
 
     // Get the address of the symbol within the library using nm
-    auto command = std::format("nm {} | grep ' T '", path);
+    auto command = std::format("nm -D --defined-only {} | grep ' T '", path);
     auto symbol_address_command = utility::make_popen(command, "r");
     if (!symbol_address_command) {
         perror("popen");
@@ -72,15 +72,16 @@ auto getLibraryStartAddress(const char *library_name) -> uintptr_t {
     }
 
     if (library_path[0] == '\0') {
-        std::cout << std::format("Library {} not found in memory maps.\n", library_name);
+        std::cout << std::format("Library {} not found in memory maps.\n",
+                                 library_name);
         return 0;
     }
 
     return start_address;
 }
 
-auto getSymbolAddress(const char *library_name,
-                      const char *symbol_name) -> uintptr_t {
+auto getSymbolAddress(const char *library_name, const char *symbol_name)
+    -> uintptr_t {
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
     uintptr_t start_address{}, end_address{};
@@ -111,12 +112,14 @@ auto getSymbolAddress(const char *library_name,
     }
 
     if (strlen(library_path) == 0) {
-        std::cout << std::format("Library {} not found in memory maps.\n", library_name);
+        std::cout << std::format("Library {} not found in memory maps.\n",
+                                 library_name);
         return 0;
     }
 
     // Get the address of the symbol within the library using nm
-    auto command = std::format("nm -D --defined-only {} | grep ' {}$'", library_path, symbol_name);
+    auto command = std::format("nm -D --defined-only {} | grep ' {}$'",
+                               library_path, symbol_name);
     auto symbol_address_command = make_popen(command, "r");
     if (!symbol_address_command) {
         perror("popen");
@@ -129,10 +132,12 @@ auto getSymbolAddress(const char *library_name,
         sscanf(line, "%16s", address);
         sscanf(address, "%zx",
                &symbol_offset); // Convert hex string to unsigned long
-        std::cout << std::format("Address of symbol {} in {}: 0x{:x}\n", symbol_name, library_name,
-               start_address + symbol_offset);
+        std::cout << std::format("Address of symbol {} in {}: 0x{:x}\n",
+                                 symbol_name, library_name,
+                                 start_address + symbol_offset);
     } else {
-        std::cout << std::format("Symbol {} not found in {}.\n", symbol_name, library_name);
+        std::cout << std::format("Symbol {} not found in {}.\n", symbol_name,
+                                 library_name);
     }
 
     return start_address + symbol_offset;
