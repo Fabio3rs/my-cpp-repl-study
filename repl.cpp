@@ -6,13 +6,13 @@
 #include "analysis/ast_analyzer.hpp"
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
+#include "compiler/compiler_service.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
 #include "utility/library_introspection.hpp"
 #include "utility/quote.hpp"
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -28,14 +28,12 @@
 #include <functional>
 #include <iterator>
 #include <mutex>
-#include <numeric>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <segvcatch.h>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <unordered_map>
@@ -44,6 +42,29 @@
 
 static BuildSettings buildSettings;
 static ReplState replState;
+
+// Callback para merge de variáveis no CompilerService
+static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
+    for (const auto &var : vars) {
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
+        }
+    }
+}
+
+// Instância global do CompilerService
+static std::unique_ptr<compiler::CompilerService> compilerService;
+
+// Inicializar o CompilerService
+static void initCompilerService() {
+    if (!compilerService) {
+        compilerService = std::make_unique<compiler::CompilerService>(
+            &buildSettings,
+            nullptr, // AstContext será definido quando necessário
+            mergeVarsCallback);
+    }
+}
 
 std::any lastReplResult; // used for external commands
 
@@ -56,7 +77,6 @@ void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars);
 // Forward declaration of adapter
 // Adapter defined below
 
-#include "commands/command_registry.hpp"
 #include "commands/repl_commands.hpp"
 
 static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
@@ -107,99 +127,34 @@ auto getPreprocessorDefinitionsStr() -> std::string {
 
 int onlyBuildLib(std::string compiler, const std::string &name,
                  std::string ext = ".cpp", std::string std = "gnu++20") {
-    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+    initCompilerService();
 
-    if (ext == ".c") {
-        includePrecompiledHeader = "";
+    auto result = compilerService->buildLibraryOnly(compiler, name, ext, std);
+
+    if (!result) {
+        std::cerr << "Build failed with error code: "
+                  << static_cast<int>(result.error) << std::endl;
     }
 
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g "
-               "-Wl,--export-dynamic -fPIC " +
-               name + ext + " " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so";
-
-    return system(cmd.c_str());
+    return result.success() ? result.value : -1;
 }
 
 int buildLibAndDumpAST(std::string compiler, const std::string &name,
                        std::string ext = ".cpp", std::string std = "gnu++20") {
-    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+    initCompilerService();
 
-    if (ext == ".c") {
-        includePrecompiledHeader = "";
+    auto result =
+        compilerService->buildLibraryWithAST(compiler, name, ext, std);
+
+    if (!result) {
+        std::cerr << "Build with AST failed with error code: "
+                  << static_cast<int>(result.error) << std::endl;
+        return -1;
     }
 
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g "
-               "-Wl,--export-dynamic -fPIC " +
-               name + ext + " " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so";
-    int buildres = system(cmd.c_str());
-
-    if (buildres != 0) {
-        return buildres;
-    }
-
-    cmd = compiler + " -std=" + std + " -fPIC -Xclang -ast-dump=json " +
-          includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-          getPreprocessorDefinitionsStr() + " -fsyntax-only " + name + ext +
-          " -o "
-          "lib" +
-          name + ".so > " + name + ".json";
-    int sysres = system(cmd.c_str());
-    if (sysres != 0) {
-        return sysres;
-    }
-
-    analysis::ClangAstAnalyzerAdapter analyzer;
-    std::vector<VarDecl> vars;
-    int ares = analyzer.analyzeFile(name + ".json", name + ".cpp", vars);
-    if (ares != 0) {
-        return ares;
-    }
-
-    // merge todasVars with vars
-    for (const auto &var : vars) {
-        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
-            replState.varsNames.insert(var.name);
-            replState.allTheVariables.push_back(var);
-        }
-    }
-
-    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-          getIncludeDirectoriesStr() +
-          " -std=gnu++20 -shared -include precompiledheader.hpp -g "
-          "-Wl,--export-dynamic -fPIC " +
-          name + ".cpp " + getLinkLibrariesStr() +
-          " -o "
-          "lib" +
-          name + ".so";
-    std::cout << cmd << std::endl;
-    int buildres2 = system(cmd.c_str());
-
-    if (buildres2 != 0) {
-        std::cerr << "buildres != 0: " << cmd << std::endl;
-        return buildres2;
-    }
-
-    savePrintAllVarsLibrary(vars);
-
-    // merge todasVars with vars
-    for (const auto &var : vars) {
-        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
-            replState.varsNames.insert(var.name);
-            replState.allTheVariables.push_back(var);
-        }
-    }
+    // As variáveis já foram merged via callback, agora só precisamos salvar a
+    // biblioteca de print
+    savePrintAllVarsLibrary(result.value);
 
     return 0;
 }
@@ -270,29 +225,17 @@ auto runProgramGetOutput(std::string_view cmd) {
 int build_precompiledheader(
     std::string compiler = "clang++",
     std::shared_ptr<analysis::AstContext> context = nullptr) {
-    std::fstream precompHeader("precompiledheader.hpp",
-                               std::ios::out | std::ios::trunc);
+    initCompilerService();
 
-    precompHeader << "#pragma once\n\n" << std::endl;
-    precompHeader << "#include <any>\n" << std::endl;
-    precompHeader << "extern int (*bootstrapProgram)(int argc, char "
-                     "**argv);\n";
-    precompHeader << "extern std::any lastReplResult;\n";
-    precompHeader << "#include \"printerOutput.hpp\"\n\n" << std::endl;
+    auto result = compilerService->buildPrecompiledHeader(compiler, context);
 
-    // Se temos um contexto, usar os includes dele
-    if (context) {
-        precompHeader << context->getOutputHeader() << std::endl;
+    if (!result) {
+        std::cerr << "Precompiled header build failed with error code: "
+                  << static_cast<int>(result.error) << std::endl;
+        return -1;
     }
 
-    precompHeader.flush();
-    precompHeader.close();
-
-    std::string cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-                      getIncludeDirectoriesStr() +
-                      " -fPIC -x c++-header -std=gnu++20 -o "
-                      "precompiledheader.hpp.pch precompiledheader.hpp";
-    return system(cmd.c_str());
+    return 0;
 }
 
 // moved into replState
@@ -460,25 +403,6 @@ auto buildASTWithPrintVarsFn(std::string compiler,
     return vars;
 }
 
-auto concatNames(const std::vector<std::string> &names) -> std::string {
-    std::string concat;
-
-    size_t size = 0;
-
-    for (const auto &name : names) {
-        size += name.size() + 1;
-    }
-
-    concat.reserve(size);
-
-    for (const auto &name : names) {
-        concat += name;
-        concat += " ";
-    }
-
-    return concat;
-}
-
 void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
                                  const std::string &wrappedname) {
     std::fstream replOutput(wrappedname, std::ios::out | std::ios::trunc);
@@ -556,146 +480,35 @@ auto analyzeCustomCommands(
 
 auto linkAllObjects(const std::vector<std::string> &objects,
                     const std::string &libname) -> int {
-    std::string linkLibraries = getLinkLibrariesStr();
+    initCompilerService();
 
-    std::string namesConcated = concatNames(objects);
+    auto result = compilerService->linkObjects(objects, libname);
 
-    std::string cmd;
+    if (!result) {
+        std::cerr << "Linking failed with error code: "
+                  << static_cast<int>(result.error) << std::endl;
+    }
 
-    cmd = "clang++ -shared -g -WL,--export-dynamic " + namesConcated + " " +
-          linkLibraries + " -o lib" + libname + ".so";
-    std::cout << cmd << std::endl;
-    return system(cmd.c_str());
+    return result.success() ? result.value : -1;
 }
 
 auto buildLibAndDumpASTWithoutPrint(
     std::string compiler, const std::string &libname,
     const std::vector<std::string> &names,
     const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
-    std::pair<std::vector<VarDecl>, int> resultc;
+    initCompilerService();
 
-    std::string includes = getIncludeDirectoriesStr();
-    std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
+    auto result = compilerService->buildMultipleSourcesWithAST(
+        compiler, libname, names, std);
 
-    auto now = std::chrono::system_clock::now();
-
-    std::string namesConcated;
-
-    namesConcated.reserve(std::accumulate(
-        names.begin(), names.end(), 0,
-        [](size_t acc, const auto &name) { return acc + name.size() + 1; }));
-
-    std::mutex namesConcatedMutex;
-
-    std::for_each(
-        std::execution::par_unseq, names.begin(), names.end(),
-        [&](const auto &name) {
-            if (name.empty()) {
-                return;
-            }
-
-            const auto path = std::filesystem::path(name);
-            std::string purefilename = path.filename().string();
-
-            purefilename =
-                purefilename.substr(0, purefilename.find_last_of('.'));
-
-            std::thread analyzeThr([&]() {
-                std::string logname = purefilename + ".log";
-                std::string cmd =
-                    compiler + preprocessorDefinitions + " " + includes +
-                    " -std=" + std +
-                    " -fPIC -Xclang -ast-dump=json "
-                    " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
-                    "-include precompiledheader.hpp -fsyntax-only " +
-                    name + " -o lib" + purefilename + "_blank.so 2>" + logname;
-
-                auto out = runProgramGetOutput(cmd);
-
-                if (out.second != 0) {
-                    std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
-                              << " " << cmd << std::endl;
-                    std::fstream file(logname, std::ios::in);
-
-                    std::copy(std::istreambuf_iterator<char>(file),
-                              std::istreambuf_iterator<char>(),
-                              std::ostreambuf_iterator<char>(std::cerr));
-                    resultc.second = out.second;
-                    return;
-                }
-
-                analysis::ClangAstAnalyzerAdapter analyzer;
-                simdjson::padded_string_view json(out.first);
-                analyzer.analyzeJson(json, name, resultc.first);
-            });
-
-            try {
-                std::string object = purefilename + ".o";
-
-                {
-                    std::scoped_lock<std::mutex> lck(namesConcatedMutex);
-                    namesConcated += object + " ";
-                }
-
-                std::string cmd =
-                    compiler + preprocessorDefinitions + " " + includes +
-                    " -std=gnu++20 -fPIC  -c -Xclang "
-                    "-include-pch -Xclang precompiledheader.hpp.pch "
-                    "-include precompiledheader.hpp "
-                    "-g -fPIC " +
-                    name + " -o " + object;
-
-                int buildres = system(cmd.c_str());
-
-                if (buildres != 0) {
-                    resultc.second = buildres;
-                    std::cerr << "buildres != 0: " << cmd << std::endl;
-                    std::cout << name << std::endl;
-                }
-            } catch (const std::exception &e) {
-                std::cerr << e.what() << std::endl;
-                resultc.second = -1;
-            }
-
-            if (analyzeThr.joinable()) {
-                analyzeThr.join();
-            }
-        });
-
-    if (resultc.second != 0) {
-        return resultc;
+    if (!result) {
+        std::cerr << "Build multiple sources failed with error code: "
+                  << static_cast<int>(result.error) << std::endl;
+        return {{}, -1};
     }
 
-    auto end = std::chrono::system_clock::now();
-
-    std::cout << "Analyze and compile time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       now)
-                     .count()
-              << "ms\n";
-
-    std::string linkLibraries = getLinkLibrariesStr();
-
-    std::string cmd;
-
-    cmd = compiler +
-          " -shared -g "
-          "-WL,--export-dynamic " +
-          namesConcated + " " + getLinkLibrariesStr() +
-          " -o "
-          "lib" +
-          libname + ".so";
-    std::cout << cmd << std::endl;
-    int linkRes = system(cmd.c_str());
-
-    if (linkRes != 0) {
-        std::cerr << "linkRes != 0: " << cmd << std::endl;
-        return resultc;
-    }
-
-    mergeVars(resultc.first);
-
-    return resultc;
+    // As variáveis já foram merged via callback
+    return {result.value.variables, result.value.returnCode};
 }
 
 int runPrintAll() {
