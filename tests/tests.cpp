@@ -22,6 +22,9 @@ class ReplTests : public ::testing::Test {
         fs::create_directory(unique_dir);
         fs::current_path(unique_dir);
 
+        std::cout << "Using temporary directory: "
+                  << fs::current_path().string() << std::endl;
+
         // Initialize the REPL
         initRepl();
     }
@@ -83,4 +86,18 @@ TEST_F(ReplTests, DependencyAtConstructorTime) {
 
     cmd = "int bar() { return foo() + 1; }\n int a = bar();";
     ASSERT_TRUE(extExecRepl(cmd));
+}
+
+TEST_F(ReplTests, RecursiveFunction) {
+    std::string_view cmd = R"(
+        int factorial(int n) {
+            if (n <= 1) return 1;
+            return n * factorial(n - 1);
+        }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int result = factorial(5);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(120, std::any_cast<int>(getResultRepl("result")));
 }

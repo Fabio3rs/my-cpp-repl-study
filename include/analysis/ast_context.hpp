@@ -85,7 +85,7 @@ class AstContext {
     bool saveHeaderToFile(const std::string &filename) const;
 
   private:
-    std::string outputHeader_;
+    static std::string outputHeader_;
     std::unordered_set<std::string> includedFiles_;
     mutable size_t lastHeaderSize_ = 0;
 };

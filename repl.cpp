@@ -442,10 +442,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -495,14 +496,67 @@ int runPrintAll() {
 
 // Redirecionamento da função global obrigatória para o ExecutionEngine
 extern "C" void loadfnToPtr(void **ptr, const char *name) {
+    /*
+     * Function related to loadFn_"funcion name", this function is called when
+     * the library constructor tries to run and the function is not loaded yet.
+     */
     auto &state = execution::getGlobalExecutionState();
 
-    std::cout << std::format("{}: Function segfaulted: {}   library: {}\n",
-                             __LINE__, name, state.getLastLibrary());
+    std::cout << __LINE__ << ": Function segfaulted: " << name
+              << "   library: " << state.lastLibrary << std::endl;
 
-    // TODO: Implementar a lógica completa de loadfnToPtr usando ExecutionEngine
-    // Por enquanto, stub básico
-    (void)ptr;
+    /*
+     * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
+     */
+    auto base = utility::getLibraryStartAddress(state.lastLibrary.c_str());
+
+    if (base == 0) {
+        std::cerr << __LINE__ << ": base == 0" << state.lastLibrary
+                  << std::endl;
+
+        auto handle = dlopen(state.lastLibrary.c_str(), RTLD_NOLOAD);
+
+        if (handle == nullptr) {
+            std::cerr << __LINE__ << ": handle == nullptr" << state.lastLibrary
+                      << std::endl;
+            return;
+        }
+
+        for (const auto &[symbol, offset] : state.symbolsToResolve) {
+            void **wrap_ptrfn =
+                (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
+
+            if (wrap_ptrfn == nullptr) {
+                continue;
+            }
+
+            auto tmp = dlsym(handle, symbol.c_str());
+
+            if (tmp == nullptr) {
+                std::cerr << __LINE__ << ": tmp == nullptr" << state.lastLibrary
+                          << std::endl;
+                continue;
+            }
+
+            *wrap_ptrfn = tmp;
+        }
+
+        if (*ptr == nullptr) {
+            *ptr = dlsym(handle, name);
+        }
+        return;
+    }
+
+    for (const auto &[symbol, offset] : state.symbolsToResolve) {
+        void **wrap_ptrfn =
+            (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
+
+        if (wrap_ptrfn == nullptr) {
+            continue;
+        }
+
+        *wrap_ptrfn = reinterpret_cast<void *>(base + offset);
+    }
 }
 
 void generateFunctionWrapper(std::string &wrapper, const VarDecl &fnvars) {

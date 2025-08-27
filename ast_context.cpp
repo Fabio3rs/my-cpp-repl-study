@@ -15,6 +15,12 @@ namespace analysis {
 // Thread-safe mutex para operações de escrita
 static std::mutex contextWriteMutex;
 
+/**
+ * @brief duração estática porque as declarações devem ser visíveis em toda a
+ * duração do REPL.
+ */
+std::string AstContext::outputHeader_;
+
 void AstContext::addInclude(const std::string &includePath) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
@@ -51,7 +57,7 @@ bool AstContext::hasHeaderChanged() const {
 
 void AstContext::clear() {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    outputHeader_.clear();
+    // outputHeader_.clear();
     includedFiles_.clear();
     lastHeaderSize_ = 0;
 }
