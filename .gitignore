@@ -1,6 +1,5 @@
 # Build artifacts and directories
 build/
-ninja/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
