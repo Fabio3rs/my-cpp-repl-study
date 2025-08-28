@@ -80,6 +80,17 @@ TEST_F(ReplTests, InvalidCommand) {
     ASSERT_TRUE(extExecRepl(cmd));
 }
 
+// Test: Invalid command returns false
+TEST_F(ReplTests, OverwriteFunction) {
+    std::string_view cmd = "int foo() { return 123; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int foo() { return 456; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int a = foo();";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(456, std::any_cast<int>(getResultRepl("a")));
+}
+
 TEST_F(ReplTests, DependencyAtConstructorTime) {
     std::string_view cmd = "int foo() { return 123; }";
     ASSERT_TRUE(extExecRepl(cmd));

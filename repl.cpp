@@ -475,8 +475,8 @@ void prepareFunctionWrapper(
     auto &state = execution::getGlobalExecutionState();
     // TODO: Implementar método para obter funções existentes do state
 
-    // Configuração será gerenciada internamente
-    execution::SymbolResolver::WrapperConfig config;
+    // Usar a configuração global persistente
+    auto &config = state.getWrapperConfig();
 
     functions = execution::SymbolResolver::prepareFunctionWrapper(
         name, vars, config, existingFunctions);
@@ -486,8 +486,8 @@ void fillWrapperPtrs(
     const std::unordered_map<std::string, std::string> &functions,
     void *handlewp, void *handle) {
 
-    // Criar configuração temporária para compatibilidade
-    execution::SymbolResolver::WrapperConfig config;
+    // Usar a configuração global persistente
+    auto &config = execution::getGlobalExecutionState().getWrapperConfig();
 
     execution::SymbolResolver::fillWrapperPtrs(functions, handlewp, handle,
                                                config);
