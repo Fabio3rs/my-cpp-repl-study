@@ -28,7 +28,7 @@ struct CompletionItem {
     std::string display;       // Texto para mostrar ao usuário
     std::string documentation; // Documentação da função/variável
     std::string returnType;    // Tipo de retorno (para funções)
-    int priority;              // Prioridade de ordenação
+    int priority{};              // Prioridade de ordenação
 
     enum class Kind {
         Variable,
@@ -39,7 +39,7 @@ struct CompletionItem {
         Keyword,
         Include,
         Macro
-    } kind;
+    } kind{Kind::Variable};
 };
 
 /**
