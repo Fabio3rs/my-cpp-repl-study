@@ -43,6 +43,20 @@ void GlobalExecutionState::setFnName(const std::string &mangledName,
     fnNames[mangledName] = fn;
 }
 
+SymbolResolver::WrapperConfig &GlobalExecutionState::getWrapperConfig() {
+    std::shared_lock lock(stateMutex);
+    return wrapperConfig;
+}
+
+void GlobalExecutionState::initializeWrapperConfig() {
+    std::unique_lock lock(stateMutex);
+    wrapperConfig.libraryPath = lastLibrary;
+    wrapperConfig.symbolOffsets = symbolsToResolve;
+
+    // Configurar como configuração global
+    SymbolResolver::setGlobalWrapperConfig(&wrapperConfig);
+}
+
 // Singleton para estado global
 GlobalExecutionState &getGlobalExecutionState() {
     static GlobalExecutionState instance;

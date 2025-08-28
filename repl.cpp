@@ -8,6 +8,7 @@
 #include "analysis/clang_ast_adapter.hpp"
 #include "compiler/compiler_service.hpp"
 #include "execution/execution_engine.hpp"
+#include "execution/symbol_resolver.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
@@ -465,293 +466,31 @@ int runPrintAll() {
 // MOVED: lastLibrary and symbolsToResolve moved to
 // execution::GlobalExecutionState
 
-// Redirecionamento da função global obrigatória para o ExecutionEngine
-extern "C" void loadfnToPtr(void **ptr, const char *name) {
-    /*
-     * Function related to loadFn_"funcion name", this function is called when
-     * the library constructor tries to run and the function is not loaded yet.
-     */
-    auto &state = execution::getGlobalExecutionState();
-
-    std::cout << __LINE__ << ": Function segfaulted: " << name
-              << "   library: " << state.lastLibrary << std::endl;
-
-    /*
-     * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
-     */
-    auto base = utility::getLibraryStartAddress(state.lastLibrary.c_str());
-
-    if (base == 0) {
-        std::cerr << __LINE__ << ": base == 0" << state.lastLibrary
-                  << std::endl;
-
-        auto handle = dlopen(state.lastLibrary.c_str(), RTLD_NOLOAD);
-
-        if (handle == nullptr) {
-            std::cerr << __LINE__ << ": handle == nullptr" << state.lastLibrary
-                      << std::endl;
-            return;
-        }
-
-        for (const auto &[symbol, offset] : state.symbolsToResolve) {
-            void **wrap_ptrfn =
-                (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
-
-            if (wrap_ptrfn == nullptr) {
-                continue;
-            }
-
-            auto tmp = dlsym(handle, symbol.c_str());
-
-            if (tmp == nullptr) {
-                std::cerr << __LINE__ << ": tmp == nullptr" << state.lastLibrary
-                          << std::endl;
-                continue;
-            }
-
-            *wrap_ptrfn = tmp;
-        }
-
-        if (*ptr == nullptr) {
-            *ptr = dlsym(handle, name);
-        }
-        return;
-    }
-
-    for (const auto &[symbol, offset] : state.symbolsToResolve) {
-        void **wrap_ptrfn =
-            (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
-
-        if (wrap_ptrfn == nullptr) {
-            continue;
-        }
-
-        *wrap_ptrfn = reinterpret_cast<void *>(base + offset);
-    }
-}
-
-void generateFunctionWrapper(std::string &wrapper, const VarDecl &fnvars) {
-    auto qualTypestr = std::string(fnvars.qualType);
-    auto parem = qualTypestr.find_first_of('(');
-
-    // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
-    // {
-    qualTypestr = std::format("extern \"C\" void __attribute__ ((naked)) {}()",
-                              fnvars.mangledName);
-    /*} else {
-        qualTypestr.insert(parem,
-                           std::string(" __attribute__ ((naked)) " +
-                                       fnvars.mangledName));
-        qualTypestr.insert(0, "extern \"C\" ");
-    }*/
-
-    /*
-     * This is the function that will be called when the library
-     * initializes and the functions are not ready yet, it will try to
-     * load the function address and set it to the pointer
-     */
-    wrapper += std::format("static void __attribute__((naked)) loadFn_{}();\n",
-                           fnvars.mangledName);
-
-    wrapper += std::format("extern \"C\" void *{}_ptr = "
-                           "reinterpret_cast<void*>(loadFn_{});\n\n",
-                           fnvars.mangledName, fnvars.mangledName);
-    wrapper += qualTypestr + " {\n";
-    wrapper += std::format(R"(    __asm__ __volatile__ (
-        "jmp *%0\n"
-        :
-        : "r" ({}_ptr)
-    );
-}}
-)",
-                           fnvars.mangledName);
-
-    wrapper +=
-        std::format("static void __attribute__((naked)) loadFn_{}() {{\n",
-                    fnvars.mangledName);
-
-    /*
-     * Observations: Keep the stack aligned in 16 bytes before calling a
-     * function
-     */
-    wrapper += R"(
-    __asm__(
-        // Save all general-purpose registers
-        "pushq   %rax                \n"
-        "pushq   %rbx                \n"
-        "pushq   %rcx                \n"
-        "pushq   %rdx                \n"
-        "pushq   %rsi                \n"
-        "pushq   %rdi                \n"
-        "pushq   %rbp                \n"
-        "pushq   %r8                 \n"
-        "pushq   %r9                 \n"
-        "pushq   %r10                \n"
-        "pushq   %r11                \n"
-        "pushq   %r12                \n"
-        "pushq   %r13                \n"
-        "pushq   %r14                \n"
-        "pushq   %r15                \n"
-        "movq    %rsp, %rbp          \n" // Set Base Pointer
-    );
-        // Push parameters onto the stack
-        //"leaq    _Z21qRegisterResourceDataiPKhS0_S0__ptr(%rip), %rax  \n" // Address of pointer
-    __asm__ __volatile__ (
-        "movq %0, %%rax"
-        :
-        : "r" (&)" +
-               std::format("{}_ptr", fnvars.mangledName) +
-               R"()
-    );
-
-    __asm__(
-        // Push parameters onto the stack
-        //"leaq    )" +
-               fnvars.mangledName +
-               R"(_ptr(%rip), %rax  \n" // Address
-                                                                          // of
-                                                                          // pointer
-        "movq    %rax, %rdi          \n" // Parameter 1: pointer address
-        "leaq    .LC)" +
-               std::format("{}", fnvars.mangledName) +
-               R"((%rip), %rsi    \n" // Address of string "a"
-
-        // Call loadfnToPtr function
-        "call    loadfnToPtr  \n" // Call loadfnToPtr function
-
-        // Restore all general-purpose registers
-        "popq    %r15                \n"
-        "popq    %r14                \n"
-        "popq    %r13                \n"
-        "popq    %r12                \n"
-        "popq    %r11                \n"
-        "popq    %r10                \n"
-        "popq    %r9                 \n"
-        "popq    %r8                 \n"
-        "popq    %rbp                \n"
-        "popq    %rdi                \n"
-        "popq    %rsi                \n"
-        "popq    %rdx                \n"
-        "popq    %rcx                \n"
-        "popq    %rbx                \n"
-        "popq    %rax                \n");
-    __asm__ __volatile__("jmp *%0\n"
-                         :
-                         : "r"()" +
-               fnvars.mangledName +
-               R"(_ptr));
-
-
-    __asm__(".section .rodata            \n"
-            ".LC)" +
-               fnvars.mangledName +
-               R"(:                        \n"
-            ".string \")" +
-               fnvars.mangledName +
-               R"(\"                \n");
-    __asm__(".section .text            \n");
-}
-            )";
-}
-
 void prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     std::unordered_map<std::string, std::string> &functions) {
-    std::string wrapper;
 
-    // wrapper += "#include \"decl_amalgama.hpp\"\n\n";
+    // Obter funções existentes do execution state
+    std::unordered_set<std::string> existingFunctions;
+    auto &state = execution::getGlobalExecutionState();
+    // TODO: Implementar método para obter funções existentes do state
 
-    std::unordered_set<std::string> addedFns;
+    // Configuração será gerenciada internamente
+    execution::SymbolResolver::WrapperConfig config;
 
-    for (const auto &fnvars : vars) {
-        std::cout << fnvars.name << std::endl;
-        if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl" &&
-            fnvars.kind != "CXXConstructorDecl") {
-            continue;
-        }
-
-        if (fnvars.mangledName == "main") {
-            continue;
-        }
-
-        if (addedFns.contains(fnvars.mangledName)) {
-            continue;
-        }
-
-        if (!execution::getGlobalExecutionState().hasFnName(
-                fnvars.mangledName)) {
-            addedFns.insert(fnvars.mangledName);
-
-            generateFunctionWrapper(wrapper, fnvars);
-        }
-
-        functions[fnvars.mangledName] = fnvars.name;
-    }
-
-    if (!functions.empty()) {
-        auto wrappername = std::format("wrapper_{}", name);
-        std::fstream wrapperOutput(std::format("{}.cpp", wrappername),
-                                   std::ios::out | std::ios::trunc);
-        wrapperOutput << wrapper << std::endl;
-        wrapperOutput.close();
-
-        onlyBuildLib("clang++", wrappername, ".cpp", "gnu++20", "-nostdlib");
-    }
+    functions = execution::SymbolResolver::prepareFunctionWrapper(
+        name, vars, config, existingFunctions);
 }
 
 void fillWrapperPtrs(
     const std::unordered_map<std::string, std::string> &functions,
     void *handlewp, void *handle) {
-    for (const auto &[mangledName, fns] : functions) {
-        void *fnptr = dlsym(handle, mangledName.c_str());
-        if (!fnptr) {
-            void **wrap_ptrfn =
-                (void **)dlsym(handlewp, std::format("{}_ptr", fns).c_str());
 
-            if (!wrap_ptrfn) {
-                continue;
-            }
+    // Criar configuração temporária para compatibilidade
+    execution::SymbolResolver::WrapperConfig config;
 
-            if (!execution::getGlobalExecutionState().hasFnName(mangledName)) {
-                continue;
-            }
-
-            auto &fn =
-                execution::getGlobalExecutionState().getFnName(mangledName);
-            fn.fnptr = nullptr;
-            fn.wrap_ptrfn = wrap_ptrfn;
-            continue;
-        }
-
-        if (execution::getGlobalExecutionState().hasFnName(mangledName)) {
-            auto &fnWrapper =
-                execution::getGlobalExecutionState().getFnName(mangledName);
-            fnWrapper.fnptr = fnptr;
-
-            void **wrap_ptrfn = fnWrapper.wrap_ptrfn;
-
-            if (wrap_ptrfn) {
-                *wrap_ptrfn = fnptr;
-            }
-            continue;
-        }
-
-        auto &fn = execution::getGlobalExecutionState().getFnName(mangledName);
-
-        fn.fnptr = fnptr;
-
-        void **wrap_ptrfn = (void **)dlsym(
-            handlewp, std::format("{}_ptr", mangledName).c_str());
-
-        if (!wrap_ptrfn) {
-            std::cerr << std::format("Cannot load symbol '{}': {}\n",
-                                     mangledName, dlerror());
-            continue;
-        }
-
-        *wrap_ptrfn = fnptr;
-        fn.wrap_ptrfn = wrap_ptrfn;
-    }
+    execution::SymbolResolver::fillWrapperPtrs(functions, handlewp, handle,
+                                               config);
 }
 
 // moved into replState
@@ -770,26 +509,14 @@ void resolveSymbolOffsetsFromLibraryFile(
         return;
     }
 
-    auto command =
-        std::format("nm -D --defined-only {}",
-                    execution::getGlobalExecutionState().getLastLibrary());
-    auto symbol_address_command = utility::make_popen(command, "r");
-    if (!symbol_address_command) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
+    auto libraryPath = execution::getGlobalExecutionState().getLastLibrary();
+    auto symbolOffsets =
+        execution::SymbolResolver::resolveSymbolOffsetsFromLibraryFile(
+            functions, libraryPath);
 
-    char line[1024]{};
-
-    while (fgets(line, 1024, symbol_address_command.get()) != NULL) {
-        uintptr_t symbol_offset = 0;
-        char symbol_name[256];
-        sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
-
-        if (functions.contains(symbol_name)) {
-            execution::getGlobalExecutionState().addSymbolToResolve(
-                symbol_name, symbol_offset);
-        }
+    // Adicionar offsets ao execution state
+    for (const auto &[symbol, offset] : symbolOffsets) {
+        execution::getGlobalExecutionState().addSymbolToResolve(symbol, offset);
     }
 }
 
@@ -825,6 +552,9 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     execution::getGlobalExecutionState().setLastLibrary(libraryPath);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
+
+    // Inicializar configuração global para trampolines
+    execution::getGlobalExecutionState().initializeWrapperConfig();
 
     EvalResult result;
     result.libpath = libraryPath;

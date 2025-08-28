@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../repl.hpp"
+#include "symbol_resolver.hpp"
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -20,6 +21,9 @@ struct GlobalExecutionState {
     std::unordered_map<std::string, uintptr_t> symbolsToResolve;
     std::unordered_map<std::string, wrapperFn> fnNames;
 
+    // Configuração global para resolução de símbolos via trampolines
+    SymbolResolver::WrapperConfig wrapperConfig;
+
     // Counters globais
     int64_t replCounter = 0;
     int ctrlcounter = 0;
@@ -35,6 +39,10 @@ struct GlobalExecutionState {
     bool hasFnName(const std::string &mangledName) const;
     wrapperFn &getFnName(const std::string &mangledName);
     void setFnName(const std::string &mangledName, const wrapperFn &fn);
+
+    // Métodos para gerenciar configuração de wrappers
+    SymbolResolver::WrapperConfig &getWrapperConfig();
+    void initializeWrapperConfig();
 };
 
 // Acesso controlado ao estado global singleton
