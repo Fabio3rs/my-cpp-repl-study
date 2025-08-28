@@ -91,6 +91,22 @@ TEST_F(ReplTests, OverwriteFunction) {
     ASSERT_EQ(456, std::any_cast<int>(getResultRepl("a")));
 }
 
+TEST_F(ReplTests, FunctionUsingVariable) {
+    std::string_view cmd = "int val = 10; int getVal() { return val; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int result = getVal();";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(10, std::any_cast<int>(getResultRepl("result")));
+}
+
+TEST_F(ReplTests, AutoIdentifySimpleEvalCode) {
+    std::string_view cmd = "int val = 10;";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "val += 5;";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(15, std::any_cast<int>(getResultRepl("val")));
+}
+
 TEST_F(ReplTests, DependencyAtConstructorTime) {
     std::string_view cmd = "int foo() { return 123; }";
     ASSERT_TRUE(extExecRepl(cmd));
