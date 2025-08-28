@@ -84,16 +84,17 @@ void showUsage(const char *programName) {
         << "  4+ (-vvvv+)             + Debug information and AST details\n\n";
 
     std::cout << "EXAMPLES:\n";
-    std::cout << "  " << programName
-              << "                    Start interactive REPL (quiet mode)\n";
-    std::cout << "  " << programName
-              << " -v               Start with basic verbosity\n";
-    std::cout << "  " << programName
-              << " -vvv             Start with high verbosity\n";
-    std::cout << "  " << programName
-              << " -s -v            Safe mode with basic verbosity\n";
-    std::cout << "  " << programName
-              << " -q -r script.cpp Execute script in quiet mode\n\n";
+    std::cout << std::format(
+        "  {}                    Start interactive REPL (quiet mode)\n",
+        programName);
+    std::cout << std::format(
+        "  {} -v               Start with basic verbosity\n", programName);
+    std::cout << std::format(
+        "  {} -vvv             Start with high verbosity\n", programName);
+    std::cout << std::format(
+        "  {} -s -v            Safe mode with basic verbosity\n", programName);
+    std::cout << std::format(
+        "  {} -q -r script.cpp Execute script in quiet mode\n\n", programName);
 
     std::cout << "INTERACTIVE COMMANDS:\n";
     std::cout << "  #help                   List all available REPL commands\n";
@@ -127,25 +128,22 @@ void segfaultHandler(int sig) {
     ucontext_t context;
     getcontext(&context);
 
-    std::string message = "Segmentation fault at address: ";
-
     void *addr = (void *)context.uc_mcontext.gregs[REG_RIP];
 
-    message += std::to_string((uintptr_t)addr);
-    message += "\n";
+    std::string message = std::format("Segmentation fault at address: {}\n",
+                                      reinterpret_cast<uintptr_t>(addr));
 
     // get lib from addr
     Dl_info info;
     if (dladdr(addr, &info)) {
-        message += info.dli_fname;
-        message += " ";
+        message += std::format("{} ", info.dli_fname);
     }
 
     // get line from addr
-    char buf[1024];
-    snprintf(buf, sizeof(buf), "addr2line -e %s %p", info.dli_fname,
-             (void *)((char *)addr - (char *)info.dli_fbase));
-    auto fp = utility::make_popen(buf, "r");
+    std::string cmd = std::format(
+        "addr2line -e {} {:p}", info.dli_fname,
+        reinterpret_cast<void *>((char *)addr - (char *)info.dli_fbase));
+    auto fp = utility::make_popen(cmd.c_str(), "r");
     if (fp) {
         char *line = nullptr;
         size_t len = 0;
@@ -158,18 +156,17 @@ void segfaultHandler(int sig) {
     // printf("addr: %p  base: %p %d %p\n", addr, info.dli_fbase, getpid(),
     // (void*)((char*)addr - (char*)info.dli_fbase));
 
-    message += "Offset: ";
-    message +=
-        std::to_string((uintptr_t)((char *)addr - (char *)info.dli_fbase));
-    message += "\n";
+    message += std::format(
+        "Offset: {}\n",
+        static_cast<uintptr_t>((char *)addr - (char *)info.dli_fbase));
 
     // get instruction
-    char instr[1024];
-    snprintf(instr, sizeof(instr),
-             "objdump -d %s -j .text -l --start-address=%p --stop-address=%p",
-             info.dli_fname, (void *)((char *)addr - (char *)info.dli_fbase),
-             (void *)((char *)addr - (char *)info.dli_fbase + 1));
-    auto fp2 = utility::make_popen(instr, "r");
+    std::string instrCmd = std::format(
+        "objdump -d {} -j .text -l --start-address={:p} --stop-address={:p}",
+        info.dli_fname,
+        reinterpret_cast<void *>((char *)addr - (char *)info.dli_fbase),
+        reinterpret_cast<void *>((char *)addr - (char *)info.dli_fbase + 1));
+    auto fp2 = utility::make_popen(instrCmd.c_str(), "r");
     if (fp2) {
         char *line = nullptr;
         size_t len = 0;
@@ -198,16 +195,8 @@ void segfaultHandler(int sig) {
     bt_size = backtrace(bt.data(), bt.size());
     bt_syms = bt_syms_t(backtrace_symbols(bt.data(), bt_size));
 
-    size_t fulllen = 0;
     for (int i = 1; i < bt_size; i++) {
-        fulllen += strlen((bt_syms.get())[i]) + 1;
-    }
-
-    message.reserve(fulllen + message.size() + 1);
-
-    for (int i = 1; i < bt_size; i++) {
-        message.append((bt_syms.get())[i]);
-        message += "\n";
+        message += std::format("{}\n", (bt_syms.get())[i]);
     }
 
     notifyError("Segmentation fault", message);
@@ -470,7 +459,7 @@ int main(int argc, char **argv) {
             return bootstrapProgram(argc, argv);
         }
     } catch (const std::exception &e) {
-        std::cerr << "C++ exception: " << e.what() << std::endl;
+        std::cerr << std::format("C++ exception: {}\n", e.what());
         return 1;
     }
 

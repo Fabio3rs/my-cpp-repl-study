@@ -401,17 +401,16 @@ int ContextualAstAnalyzer::analyzeASTFile(const std::string &filename,
 
     simdjson::padded_string json;
     if (::verbosityLevel >= 2) {
-        std::cout << "loading: " << filename << std::endl;
+        std::cout << std::format("loading: {}\n", filename);
     }
     auto error = simdjson::padded_string::load(filename).get(json);
     if (error) {
-        std::cout << "could not load the file " << filename << std::endl;
+        std::cout << std::format("could not load the file {}\n", filename);
         std::cout << "error code: " << error << std::endl;
         return EXIT_FAILURE;
     } else if (::verbosityLevel >= 2) {
-        std::cout << "loaded: " << json.size() << " bytes." << std::endl;
+        std::cout << std::format("loaded: {} bytes.\n", json.size());
     }
-
     return analyzeASTFromJsonString(json, source, vars);
 }
 
@@ -451,8 +450,8 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
         auto name = obj.find_field_unordered("name").get_string().value();
 
         if (::verbosityLevel >= 4) {
-            std::cout << "🔍 Processing " << kind << " named '" << name << "'"
-                      << std::endl;
+            std::cout << std::format("🔍 Processing {} named '{}'\n", kind,
+                                     name);
         }
 
         // Ignorar de outros arquivos
@@ -460,8 +459,8 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
         if (!source.empty() && !lastfile.empty() &&
             !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
             if (::verbosityLevel >= 4) {
-                std::cout << "🔍 Skipping " << name << " from different file"
-                          << std::endl;
+                std::cout << std::format("🔍 Skipping {} from different file\n",
+                                         name);
             }
             return;
         }
@@ -470,7 +469,7 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
         auto isImplicit_val = obj.find_field_unordered("isImplicit");
         if (!isImplicit_val.error() && isImplicit_val.get_bool().value()) {
             if (::verbosityLevel >= 4)
-                std::cout << "🔍 Skipping implicit " << name << std::endl;
+                std::cout << std::format("🔍 Skipping implicit {}\n", name);
             return;
         }
 
@@ -480,23 +479,23 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
         if (completeDefinition.error() ||
             !completeDefinition.get_bool().value()) {
             if (::verbosityLevel >= 4) {
-                std::cout << "🔍 Skipping incomplete definition of " << name
-                          << std::endl;
+                std::cout << std::format(
+                    "🔍 Skipping incomplete definition of {}\n", name);
             }
             return;
         }
 
         if (::verbosityLevel >= 4) {
-            std::cout << "🔍 Debug: Attempting to access range for " << name
-                      << std::endl;
+            std::cout << std::format(
+                "🔍 Debug: Attempting to access range for {}\n", name);
         }
         if (::verbosityLevel >= 3) {
-            std::cout << "📝 extractCompleteClassDefinition reached for: "
-                      << name << std::endl;
+            std::cout << std::format(
+                "📝 extractCompleteClassDefinition reached for: {}\n", name);
         }
         if (::verbosityLevel >= 2) {
-            std::cout << "⚠️  Source extraction not implemented yet for: "
-                      << name << std::endl;
+            std::cout << std::format(
+                "⚠️  Source extraction not implemented yet for: {}\n", name);
         }
 
         // ---- Extração dos offsets via find_field_unordered ----
@@ -600,15 +599,15 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
 
         if (!sourceDefinition.empty()) {
             if (::verbosityLevel >= 3) {
-                std::cout << "Copying source definition ipsis litteris: "
-                          << name << std::endl;
+                std::cout << std::format(
+                    "Copying source definition ipsis litteris: {}\n", name);
             }
             context_->addLineDirective(lastLine, lastfile);
             context_->addDeclaration(sourceDefinition);
         } else {
             if (::verbosityLevel >= 2) {
-                std::cout << "⚠️  Failed to extract source definition for: "
-                          << name << std::endl;
+                std::cout << std::format(
+                    "⚠️  Failed to extract source definition for: {}\n", name);
             }
         }
 

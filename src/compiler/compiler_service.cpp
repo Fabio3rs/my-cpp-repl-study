@@ -20,8 +20,8 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto runProgramGetOutput(std::string_view cmd)
-    -> std::pair<std::string, int>;
+extern auto
+runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
 extern int verbosityLevel;
 
 namespace compiler {
@@ -322,16 +322,16 @@ CompilerResult<void> CompilerService::buildPrecompiledHeader(
         precompHeader.close();
 
     } catch (const std::exception &e) {
-        std::cerr << "Failed to write precompiled header: " << e.what()
-                  << std::endl;
+        std::cerr << std::format("Failed to write precompiled header: {}\n",
+                                 e.what());
         result.error = CompilerError::FileWriteFailed;
         return result;
     }
 
-    std::string cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-                      getIncludeDirectoriesStr() +
-                      " -fPIC -x c++-header -std=gnu++20 -o "
-                      "precompiledheader.hpp.pch precompiledheader.hpp";
+    std::string cmd = std::format(
+        "{}{} {} -fPIC -x c++-header -std=gnu++20 -o precompiledheader.hpp.pch "
+        "precompiledheader.hpp",
+        compiler, getPreprocessorDefinitionsStr(), getIncludeDirectoriesStr());
 
     auto cmdResult = executeCommand(cmd);
     if (!cmdResult) {
@@ -348,9 +348,9 @@ CompilerService::linkObjects(const std::vector<std::string> &objects,
     std::string linkLibraries = getLinkLibrariesStr();
     std::string namesConcated = concatenateNames(objects);
 
-    std::string cmd = "clang++ -shared -g -WL,--export-dynamic " +
-                      namesConcated + " " + linkLibraries + " -o lib" +
-                      libname + ".so";
+    std::string cmd =
+        std::format("clang++ -shared -g -WL,--export-dynamic {} {} -o lib{}.so",
+                    namesConcated, linkLibraries, libname);
 
     return executeCommand(cmd);
 }
@@ -382,8 +382,8 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         purefilename = purefilename.substr(0, purefilename.find_last_of('.'));
 
         // AST Analysis - generate JSON file
-        std::string logname = purefilename + ".log";
-        std::string jsonFile = purefilename + ".json";
+        std::string logname = std::format("{}.log", purefilename);
+        std::string jsonFile = std::format("{}.json", purefilename);
         std::string cmd =
             compiler + preprocessorDefinitions + " " + includes +
             " -std=" + std +
@@ -423,15 +423,15 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
 
         // Compile to object
         try {
-            std::string object = purefilename + ".o";
-            namesConcated += object + " ";
+            std::string object = std::format("{}.o", purefilename);
+            namesConcated += std::format("{} ", object);
 
-            cmd = compiler + preprocessorDefinitions + " " + includes +
-                  " -std=gnu++20 -fPIC -c -Xclang "
-                  "-include-pch -Xclang precompiledheader.hpp.pch "
-                  "-include precompiledheader.hpp "
-                  "-g -fPIC " +
-                  name + " -o " + object;
+            cmd = std::format("{}{} {} -std=gnu++20 -fPIC -c -Xclang "
+                              "-include-pch -Xclang precompiledheader.hpp.pch "
+                              "-include precompiledheader.hpp "
+                              "-g -fPIC {} -o {}",
+                              compiler, preprocessorDefinitions, includes, name,
+                              object);
 
             int buildres = system(cmd.c_str());
 
@@ -467,9 +467,9 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
               << "ms\n";
 
     // Link all objects
-    std::string cmd = compiler + " -shared -g -WL,--export-dynamic " +
-                      namesConcated + " " + getLinkLibrariesStr() + " -o lib" +
-                      libname + ".so";
+    std::string cmd =
+        std::format("{} -shared -g -WL,--export-dynamic {} {} -o lib{}.so",
+                    compiler, namesConcated, getLinkLibrariesStr(), libname);
 
     auto linkResult = executeCommand(cmd);
     if (!linkResult) {

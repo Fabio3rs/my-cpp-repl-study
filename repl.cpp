@@ -414,11 +414,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -871,30 +870,27 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
                 if (btrace != nullptr && size > 0) {
                     std::cerr
-                        << "Backtrace (based on callstack return address): "
-                        << std::endl;
-
+                        << "Backtrace (based on callstack return address):\n";
                     backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
-                    std::cerr << "Backtrace not available" << std::endl;
+                    std::cerr << "Backtrace not available\n";
                 }
             } catch (const std::exception &e) {
-                std::cerr << "C++ exception on exec/eval: " << e.what()
-                          << std::endl;
+                std::cerr << std::format("C++ exception on exec/eval: {}\n",
+                                         e.what());
 
                 auto [btrace, size] =
                     backtraced_exceptions::get_backtrace_for(e);
 
                 if (btrace != nullptr && size > 0) {
                     std::cerr
-                        << "Backtrace (based on callstack return address): "
-                        << std::endl;
+                        << "Backtrace (based on callstack return address):\n";
                     backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
-                    std::cerr << "Backtrace not available" << std::endl;
+                    std::cerr << "Backtrace not available\n";
                 }
             } catch (...) {
-                std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+                std::cerr << "Unknown C++ exception on exec/eval\n";
             }
 
             auto exec_end = std::chrono::steady_clock::now();
@@ -1383,27 +1379,25 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
             auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
 
             if (btrace != nullptr && size > 0) {
-                std::cerr << "Backtrace: " << std::endl;
-
+                std::cerr << "Backtrace:\n";
                 backtraced_exceptions::print_backtrace(btrace, size);
             } else {
-                std::cerr << "Backtrace not available" << std::endl;
+                std::cerr << "Backtrace not available\n";
             }
         } catch (const std::exception &e) {
-            std::cerr << "C++ exception on exec/eval: " << e.what()
-                      << std::endl;
+            std::cerr << std::format("C++ exception on exec/eval: {}\n",
+                                     e.what());
 
             auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
 
             if (btrace != nullptr && size > 0) {
-                std::cerr << "Backtrace: " << std::endl;
-
+                std::cerr << "Backtrace:\n";
                 backtraced_exceptions::print_backtrace(btrace, size);
             } else {
-                std::cerr << "Backtrace not available" << std::endl;
+                std::cerr << "Backtrace not available\n";
             }
         } catch (...) {
-            std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+            std::cerr << "Unknown C++ exception on exec/eval\n";
         }
 
         return true;
