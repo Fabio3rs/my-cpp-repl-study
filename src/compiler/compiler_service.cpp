@@ -20,8 +20,9 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto runProgramGetOutput(std::string_view cmd)
-    -> std::pair<std::string, int>;
+extern auto
+runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
+extern int verbosityLevel;
 
 namespace compiler {
 
@@ -67,7 +68,9 @@ std::string CompilerService::buildCompileCommand(
 
 CompilerResult<int>
 CompilerService::executeCommand(const std::string &command) const {
-    std::cout << "Executing: " << command << std::endl;
+    if (verbosityLevel >= 2) {
+        std::cout << "Executing: " << command << std::endl;
+    }
 
     int result = system(command.c_str());
 

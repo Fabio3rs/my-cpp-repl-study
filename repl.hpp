@@ -12,6 +12,8 @@ extern int
     __attribute__((visibility("default"))) (*bootstrapProgram)(int argc,
                                                                char **argv);
 
+extern int verbosityLevel;
+
 struct EvalResult {
     std::string libpath;
     std::function<void()> exec;

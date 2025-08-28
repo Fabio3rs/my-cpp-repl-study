@@ -143,6 +143,32 @@ class ContextualAstAnalyzer {
 
   private:
     std::shared_ptr<AstContext> context_;
+
+    /**
+     * @brief Extrai e adiciona definição completa de classe/struct ao contexto
+     * @param element Elemento JSON da classe/struct
+     * @param source Arquivo de origem
+     * @param lastfile Último arquivo processado
+     * @param lastLine Última linha processada
+     */
+    void extractCompleteClassDefinition(
+        simdjson::simdjson_result<simdjson::ondemand::value> &element,
+        const std::filesystem::path &source,
+        const std::filesystem::path &lastfile, int64_t lastLine);
+
+    /**
+     * @brief Extrai lista de parâmetros de um tipo de função
+     * @param functionType String do tipo da função
+     * @return Lista de parâmetros
+     */
+    std::string extractParameterList(const std::string &functionType);
+
+    /**
+     * @brief Extrai tipo de retorno de um tipo de função
+     * @param functionType String do tipo da função
+     * @return Tipo de retorno
+     */
+    std::string extractReturnType(const std::string &functionType);
 };
 
 } // namespace analysis

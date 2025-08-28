@@ -32,6 +32,7 @@
 #include <mutex>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include <regex>
 #include <segvcatch.h>
 #include <string>
 #include <string_view>
@@ -44,6 +45,7 @@
 
 static BuildSettings buildSettings;
 static ReplState replState;
+int verbosityLevel = 0; // Default to quiet mode (errors only)
 
 // Callback para merge de variáveis no CompilerService
 static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
@@ -412,11 +414,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -1049,20 +1050,135 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
                              [&](const VarDecl &varInst) {
                                  return varInst.mangledName == var.mangledName;
                              }) == vars.end()) {
-                std::cout << __FILE__ << ":" << __LINE__
-                          << " added: " << var.name << std::endl;
+                if (verbosityLevel >= 2) {
+                    std::cout << __FILE__ << ":" << __LINE__
+                              << " added: " << var.name << std::endl;
+                }
                 vars.push_back(var);
             }
         }
     }
 
-    std::cout << "build time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       now)
-                     .count()
-              << "ms" << std::endl;
+    if (verbosityLevel >= 2) {
+        std::cout << "⏱️  Build time: "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                           now)
+                         .count()
+                  << "ms" << std::endl;
+    }
 
     return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
+}
+
+// Função para identificar se o código é uma definição ou código executável
+bool isDefinitionCode(const std::string &code) {
+    // Remove comentários e espaços em branco para análise
+    std::string trimmed = code;
+
+    // Remove comentários de linha
+    size_t pos = 0;
+    while ((pos = trimmed.find("//", pos)) != std::string::npos) {
+        size_t end = trimmed.find('\n', pos);
+        if (end == std::string::npos)
+            end = trimmed.length();
+        trimmed.erase(pos, end - pos);
+    }
+
+    // Remove comentários de bloco
+    pos = 0;
+    while ((pos = trimmed.find("/*", pos)) != std::string::npos) {
+        size_t end = trimmed.find("*/", pos + 2);
+        if (end == std::string::npos)
+            break;
+        trimmed.erase(pos, end + 2 - pos);
+    }
+
+    // Remove espaços em branco extras
+    trimmed = std::regex_replace(trimmed, std::regex(R"(\s+)"), " ");
+    trimmed = std::regex_replace(trimmed, std::regex(R"(^\s+|\s+$)"), "");
+
+    if (trimmed.empty())
+        return false;
+
+    // Patterns para definições (global scope)
+    std::vector<std::regex> definitionPatterns = {
+        // Declarações de classe/struct/enum
+        std::regex(R"(^\s*(class|struct|enum|union)\s+\w+)"),
+        std::regex(R"(^\s*(template\s*<[^>]*>\s*)?(class|struct)\s+\w+)"),
+
+        // Declarações de namespace
+        std::regex(R"(^\s*namespace\s+\w+)"),
+        std::regex(R"(^\s*using\s+namespace\s+)"),
+        std::regex(R"(^\s*using\s+\w+\s*=)"),
+
+        // Declarações de função (incluindo templates)
+        std::regex(
+            R"(^\s*(template\s*<[^>]*>\s*)?[\w:]+\s+\w+\s*\([^)]*\)\s*(const\s*)?(noexcept\s*)?(\s*->\s*[\w:]+)?\s*[{;])"),
+
+        // Declarações de variáveis globais (com tipos explícitos)
+        std::regex(
+            R"(^\s*(extern\s+)?(const\s+|constexpr\s+)?(static\s+)?[\w:]+\s+\w+(\s*=.*)?;)"),
+        std::regex(
+            R"(^\s*(auto|int|float|double|char|bool|string|std::[\w:]+)\s+\w+(\s*=.*)?;)"),
+
+        // Typedef e type aliases
+        std::regex(R"(^\s*typedef\s+)"),
+        std::regex(R"(^\s*using\s+\w+\s*=\s*)"),
+
+        // Forward declarations
+        std::regex(R"(^\s*(class|struct|enum)\s+\w+\s*;)"),
+
+        // Preprocessor directives (exceto #eval, #return, etc.)
+        std::regex(
+            R"(^\s*#(define|undef|ifdef|ifndef|if|else|elif|endif|include)\s)"),
+    };
+
+    // Verifica se corresponde a algum pattern de definição
+    for (const auto &pattern : definitionPatterns) {
+        if (std::regex_search(trimmed, pattern)) {
+            return true;
+        }
+    }
+
+    // Patterns para código executável (statements)
+    std::vector<std::regex> executablePatterns = {
+        // Chamadas de função simples
+        std::regex(R"(^\s*\w+\s*\([^)]*\)\s*;?\s*$)"),
+
+        // Expressões de atribuição
+        std::regex(R"(^\s*\w+\s*[+\-*/%&|^]?=)"),
+
+        // Estruturas de controle
+        std::regex(
+            R"(^\s*(if|for|while|do|switch|try|catch|throw|return)\s*[\(\{])"),
+
+        // Operadores de incremento/decremento
+        std::regex(R"(^\s*(\+\+\w+|\w+\+\+|--\w+|\w+--)\s*;?\s*$)"),
+
+        // Expressões cout/printf
+        std::regex(R"(^\s*(std::)?(cout|printf|scanf|cin)\s*[<<>>])"),
+
+        // Statements simples sem declaração de tipo
+        std::regex(R"(^\s*\w+(\.\w+|\[\w*\])*\s*[+\-*/%&|^<>=!])")};
+
+    // Se corresponde a pattern executável, não é definição
+    for (const auto &pattern : executablePatterns) {
+        if (std::regex_search(trimmed, pattern)) {
+            return false;
+        }
+    }
+
+    // Casos especiais: se contém apenas expressões/statements sem declarações
+    // e não termina em ';' ou '{}', provavelmente é código executável
+    if (!std::regex_search(trimmed, std::regex(R"([;{}]\s*$)")) &&
+        std::regex_search(trimmed,
+                          std::regex(R"(\w+\s*[+\-*/%<>=!]|\w+\s*\()"))) {
+        return false;
+    }
+
+    // Se chegou até aqui e não foi identificado como executável,
+    // provavelmente é uma definição
+    return true;
 }
 
 // moved into replState
@@ -1215,8 +1331,22 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 cfg.compiler = "clang";
             }
         } else {
-            line = "void exec() { " + line + "; }\n";
-            cfg.analyze = false;
+            // Detecção inteligente: definição vs código executável
+            if (isDefinitionCode(line)) {
+                // É uma definição - adiciona ao escopo global sem exec()
+                if (verbosityLevel >= 2) {
+                    std::cout << "🔧 Detected global definition\n";
+                }
+                // Não envolver em exec(), deixar como definição global
+                cfg.analyze = true; // Queremos analisar definições para AST
+            } else {
+                // É código executável - envolver em exec()
+                if (verbosityLevel >= 2) {
+                    std::cout << "⚡ Detected executable code\n";
+                }
+                line = "void exec() { " + line + "; }\n";
+                cfg.analyze = false;
+            }
         }
     }
 
@@ -1234,7 +1364,9 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         rerun != replState.evalResults.end()) {
         try {
             if (rerun->second.exec) {
-                std::cout << "Rerunning compiled command" << std::endl;
+                if (verbosityLevel >= 2) {
+                    std::cout << "🔄 Rerunning cached command" << std::endl;
+                }
                 rerun->second.exec();
                 return true;
             }
@@ -1276,6 +1408,28 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     }
 
     // std::cout << line << std::endl;
+
+    // Se chegou até aqui e não foi processado por comando especial,
+    // aplica detecção inteligente para código normal
+    if (cfg.fileWrap && !line.starts_with("#eval") &&
+        !line.starts_with("#lazyeval") && !line.starts_with("#return") &&
+        !line.starts_with("#batch_eval")) {
+
+        if (isDefinitionCode(line)) {
+            // É uma definição - mantém no escopo global
+            if (verbosityLevel >= 2) {
+                std::cout << "🔧 Global definition detected\n";
+            }
+            cfg.analyze = true; // Analisar AST para definições
+        } else {
+            // É código executável - envolver em exec()
+            if (verbosityLevel >= 2) {
+                std::cout << "⚡ Executable code detected\n";
+            }
+            line = "void exec() { " + line + "; }\n";
+            cfg.analyze = false;
+        }
+    }
 
     cfg.repl_name = std::format("repl_{}", i++);
 
@@ -1379,40 +1533,98 @@ void repl() {
         perror("Failed to read history");
     }
 
+    // Mostrar comando de boas-vindas automaticamente apenas se verbosidade >= 1
+    if (verbosityLevel >= 1) {
+        std::cout
+            << "\n🎉 Welcome to C++ REPL - Interactive C++ Development!\n";
+        std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                     "━━━━━━━━━━━━━━━━━━\n";
+        std::cout << "💡 Quick tip: Type '#help' for commands, '#welcome' for "
+                     "full guide\n\n";
+    }
+
     while (true) {
+        // Prompt counter para numeração das linhas
+        static int promptCounter = 1;
+
         try {
-            char *input = readline(">>> ");
+            // Prompt mais amigável com indicador de linha
+            std::string prompt = std::format("C++[{}]>>> ", promptCounter);
+            char *input = readline(prompt.c_str());
 
             if (input == nullptr) {
+                std::cout << "\n👋 Goodbye! Thanks for using C++ REPL.\n";
                 break;
             }
 
             line = input;
             free(input);
+
+            // Skip empty lines
+            if (line.empty() ||
+                std::all_of(line.begin(), line.end(), ::isspace)) {
+                continue;
+            }
+
         } catch (const segvcatch::interrupted_by_the_user &e) {
-            std::cout << "Ctrl-C pressed" << std::endl;
-            break;
+            if (verbosityLevel >= 1) {
+                std::cout << "\n⚠️  Interrupted by user (Ctrl-C)\n";
+                std::cout << "💡 Type 'exit' to quit gracefully\n";
+            }
+            continue;
         }
 
         ctrlcounter = 0;
         add_history(line.c_str());
 
+        // Show feedback for long operations
+        auto start_time = std::chrono::steady_clock::now();
+
         try {
             if (!extExecRepl(line)) {
                 break;
             }
+
+            promptCounter++;
+
+            // Show timing for operations longer than 100ms (apenas com
+            // verbosidade >= 2)
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time);
+            if (verbosityLevel >= 2 && duration.count() > 100) {
+                std::cout << std::format("⏱️  Execution time: {}ms\n",
+                                         duration.count());
+            }
+
         } catch (const segvcatch::segmentation_fault &e) {
-            std::cerr << "Segmentation fault: " << e.what() << std::endl;
-            std::cerr << assembly_info::getInstructionAndSource(
-                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
-                      << std::endl;
+            std::cerr << std::format("💥 Segmentation fault: {}\n", e.what());
+            if (verbosityLevel >= 3) {
+                std::cerr << "🔍 Debug info: ";
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+            }
+            if (verbosityLevel >= 1) {
+                std::cerr
+                    << "💡 Tip: Use '-s' flag to enable crash protection\n";
+            }
         } catch (const segvcatch::floating_point_error &e) {
-            std::cerr << "Floating point error: " << e.what() << std::endl;
-            std::cerr << assembly_info::getInstructionAndSource(
-                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
-                      << std::endl;
+            std::cerr << std::format("🔢 Floating point error: {}\n", e.what());
+            if (verbosityLevel >= 3) {
+                std::cerr << "🔍 Debug info: ";
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+            }
         } catch (const std::exception &e) {
-            std::cerr << "C++ Exception: " << e.what() << std::endl;
+            std::cerr << std::format("❌ C++ Exception: {}\n", e.what());
+            if (verbosityLevel >= 1) {
+                std::cerr << "💡 Check your C++ syntax and try again\n";
+            }
         }
 
         if (bootstrapProgram) {
