@@ -40,6 +40,7 @@ endif()
 include_directories(SYSTEM ${TBB_INCLUDE_DIRS})
 
 option(ENABLE_NOTIFICATIONS "Enable desktop notifications" ON)
+option(ENABLE_ICONS "Enable icon support (requires wget and optionally inkscape)" ON)
 
 # export commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -87,6 +88,48 @@ endif()
 if (ENABLE_NOTIFICATIONS)
     target_link_libraries(cpprepl_lib PkgConfig::LIBNOTIFY)
     target_compile_definitions(cpprepl_lib PUBLIC ENABLE_NOTIFICATIONS)
+endif()
+
+# Icon support configuration
+if(ENABLE_ICONS)
+    # Define icon paths
+    set(CPPREPL_ICON_DIR "${CMAKE_SOURCE_DIR}/assets/icons")
+    set(CPPREPL_ICON_PNG_DIR "${CMAKE_SOURCE_DIR}/assets/icons/png")
+
+    # Add custom target to download icons
+    add_custom_target(download-icons
+        COMMAND ${CMAKE_SOURCE_DIR}/script/download_icons.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Downloading Lucide icons..."
+    )
+
+    # Check if Inkscape is available for SVG to PNG conversion
+    find_program(INKSCAPE_EXECUTABLE inkscape)
+    if(INKSCAPE_EXECUTABLE)
+        message(STATUS "Inkscape found: ${INKSCAPE_EXECUTABLE} - PNG conversion available")
+
+        # Add custom target to convert SVG to PNG
+        add_custom_target(convert-icons
+            COMMAND ${CMAKE_SOURCE_DIR}/script/convert_icons.sh ${CPPREPL_ICON_DIR} ${CPPREPL_ICON_PNG_DIR}
+            DEPENDS download-icons
+            COMMENT "Converting SVG icons to PNG format..."
+        )
+
+        # Make cpprepl depend on convert-icons
+        add_dependencies(cpprepl_lib convert-icons)
+        target_compile_definitions(cpprepl_lib PUBLIC CPPREPL_ICON_PNG_PATH="${CPPREPL_ICON_PNG_DIR}")
+    else()
+        message(STATUS "Inkscape not found - only SVG icons will be available")
+        # Make cpprepl depend on download-icons only
+        add_dependencies(cpprepl_lib download-icons)
+    endif()
+
+    # Define icon path for the application
+    target_compile_definitions(cpprepl_lib PUBLIC CPPREPL_ICON_PATH="${CPPREPL_ICON_DIR}")
+
+    message(STATUS "Icon support enabled - icons will be downloaded automatically")
+else()
+    message(STATUS "Icon support disabled")
 endif()
 
 add_executable(cpprepl main.cpp)

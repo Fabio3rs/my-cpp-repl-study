@@ -415,11 +415,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -1441,8 +1440,46 @@ void initNotifications(std::string_view appName) {
 
 void notifyError(std::string_view summary, std::string_view msg) {
 #ifndef NUSELIBNOTIFY
-    NotifyNotification *notification = notify_notification_new(
-        summary.data(), msg.data(), "/home/fabio/Downloads/icons8-erro-64.png");
+    // Função para encontrar ícone com fallback
+    auto findIcon = [](const std::string &iconName) -> std::string {
+        std::vector<std::string> searchPaths;
+
+        // 1. Tentar PNG path primeiro (se disponível)
+#ifdef CPPREPL_ICON_PNG_PATH
+        searchPaths.push_back(std::string(CPPREPL_ICON_PNG_PATH) + "/" +
+                              iconName + ".png");
+#endif
+
+        // 2. Tentar SVG path
+#ifdef CPPREPL_ICON_PATH
+        searchPaths.push_back(std::string(CPPREPL_ICON_PATH) + "/" + iconName +
+                              ".svg");
+#endif
+
+        // 3. Fallback para ícones do sistema
+        searchPaths.push_back("/usr/share/icons/hicolor/48x48/apps/error.png");
+        searchPaths.push_back("/usr/share/pixmaps/dialog-error.png");
+        searchPaths.push_back("dialog-error"); // Nome simbólico
+
+        for (const auto &path : searchPaths) {
+            if (path.find('/') != std::string::npos) {
+                // É um caminho de arquivo - verificar se existe
+                if (std::filesystem::exists(path)) {
+                    return path;
+                }
+            } else {
+                // É um nome simbólico - retornar diretamente
+                return path;
+            }
+        }
+
+        return "dialog-error"; // Fallback final
+    };
+
+    std::string iconPath = findIcon("circle-alert");
+
+    NotifyNotification *notification =
+        notify_notification_new(summary.data(), msg.data(), iconPath.c_str());
 
     // Set the urgency level of the notification
     notify_notification_set_urgency(notification, NOTIFY_URGENCY_CRITICAL);
@@ -1450,7 +1487,7 @@ void notifyError(std::string_view summary, std::string_view msg) {
     // Show the notification
     notify_notification_show(notification, NULL);
 #else
-    std::cerr << summary << ": " << msg << std::endl;
+    std::cerr << std::format("🚨 {}: {}", summary, msg) << std::endl;
 #endif
 }
 
