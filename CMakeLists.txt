@@ -79,7 +79,7 @@ target_link_libraries(cpprepl_lib pthread dl tbb readline)
 
 # Link libclang if available
 if(Clang_FOUND)
-    target_link_libraries(cpprepl_lib clangAST clangBasic clangFrontend clangSerialization clangTooling)
+    target_link_libraries(cpprepl_lib clang clangAST clangBasic clangFrontend clangSerialization clangTooling)
     target_include_directories(cpprepl_lib PUBLIC SYSTEM ${CLANG_INCLUDE_DIRS})
     target_compile_definitions(cpprepl_lib PUBLIC CLANG_COMPLETION_ENABLED)
 endif()
@@ -94,20 +94,17 @@ target_precompile_headers(cpprepl PUBLIC stdafx.hpp)
 target_link_libraries(cpprepl cpprepl_lib tbb segvcatch)
 
 # Demo executable for completion system (always available)
-add_executable(completion_demo
-    examples/completion_demo.cpp
-    src/completion/clang_completion.cpp
-    src/completion/readline_integration.cpp
-)
-target_include_directories(completion_demo PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(completion_demo readline)
-target_compile_features(completion_demo PRIVATE cxx_std_20)
 
 # If libclang is available, enable it for the demo too
 if(Clang_FOUND)
-    target_link_libraries(completion_demo clangAST clangBasic clangFrontend clangSerialization clangTooling)
-    target_include_directories(completion_demo PRIVATE ${CLANG_INCLUDE_DIRS})
+    add_executable(completion_demo
+        examples/completion_demo.cpp
+        src/completion/clang_completion.cpp
+        src/completion/readline_integration.cpp
+    )
+    target_include_directories(completion_demo PUBLIC SYSTEM ${CLANG_INCLUDE_DIRS})
     target_compile_definitions(completion_demo PUBLIC CLANG_COMPLETION_ENABLED)
+    target_link_libraries(completion_demo PRIVATE clang clangAST clangBasic clangFrontend clangSerialization clangTooling ${READLINE_LIBRARIES})
 endif()
 
 #add_executable(libclangtest libclangtest.cpp)

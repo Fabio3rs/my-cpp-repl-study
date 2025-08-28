@@ -2,13 +2,18 @@
 
 // Forward declarations para libclang (quando disponível)
 #ifdef CLANG_COMPLETION_ENABLED
-#include <clang-c/Index.h>
-#else
-// Mock types quando libclang não está disponível
-using CXIndex = void *;
-using CXTranslationUnit = void *;
-using CXCodeCompleteResults = void *;
-using CXCursorKind = int;
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/FrontendActions.h>
+#include <clang/Sema/CodeCompleteConsumer.h>
+#include <clang/Tooling/CompilationDatabase.h>
+#include <clang/Tooling/Tooling.h>
+#include <llvm/Support/CommandLine.h>
+
+// Forward declaration para nossa ação customizada
+namespace completion {
+class CompletionCollector;
+class CCAction;
+} // namespace completion
 #endif
 
 #include <string>
@@ -28,7 +33,7 @@ struct CompletionItem {
     std::string display;       // Texto para mostrar ao usuário
     std::string documentation; // Documentação da função/variável
     std::string returnType;    // Tipo de retorno (para funções)
-    int priority{};              // Prioridade de ordenação
+    int priority{};            // Prioridade de ordenação
 
     enum class Kind {
         Variable,
@@ -65,21 +70,29 @@ struct ReplContext {
  */
 class ClangCompletion {
   private:
-    CXIndex index_;
-    CXTranslationUnit translationUnit_;
     ReplContext replContext_;
 
     // Cache de completions para performance
     std::unordered_map<std::string, std::vector<CompletionItem>>
         completionCache_;
 
+#ifdef CLANG_COMPLETION_ENABLED
+    // Argumentos do compilador para LibTooling
+    std::vector<std::string> compiler_args_;
+#endif
+
     // Helpers internos
     void initializeClang();
     void cleanupClang();
     std::string buildTempFile(const std::string &partialCode) const;
+
+#ifdef CLANG_COMPLETION_ENABLED
     std::vector<CompletionItem>
-    parseClangCompletions(CXCodeCompleteResults *results) const;
-    CompletionItem::Kind mapClangKind(CXCursorKind kind) const;
+    getCompletionsWithClang(const std::string &partialCode, int line,
+                            int column);
+#endif
+    std::vector<CompletionItem>
+    getCompletionsMock(const std::string &partialCode, int line, int column);
 
   public:
     ClangCompletion();

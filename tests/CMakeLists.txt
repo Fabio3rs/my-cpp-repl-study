@@ -47,7 +47,7 @@ if (GTest_FOUND)
             test_helpers/temp_directory_fixture.hpp
         )
         target_include_directories(completion_tests PRIVATE ${CMAKE_SOURCE_DIR})
-        target_link_libraries(completion_tests cpprepl_lib GTest::GTest GTest::Main segvcatch)
+        target_link_libraries(completion_tests cpprepl_lib GTest::GTest GTest::Main segvcatch clang clangAST clangBasic clangFrontend clangSerialization clangTooling)
         target_compile_definitions(completion_tests PUBLIC CLANG_COMPLETION_ENABLED)
         gtest_discover_tests(completion_tests)
     else()
