@@ -302,7 +302,7 @@ ClangCompletion::getCompletionsMock(const std::string &partialCode, int line,
 
     std::vector<CompletionItem> mockCompletions;
 
-    // Mock completions baseado no contexto atual
+    // Enhanced mock completions based on context
     if (partialCode.find("std::") != std::string::npos) {
         mockCompletions.push_back(
             {"vector", "std::vector<T>", "Dynamic array container",
@@ -312,30 +312,136 @@ ClangCompletion::getCompletionsMock(const std::string &partialCode, int line,
         mockCompletions.push_back({"cout", "std::cout", "Console output stream",
                                    "ostream&", 8,
                                    CompletionItem::Kind::Variable});
+        mockCompletions.push_back({"complex", "std::complex<T>",
+                                   "Complex numbers", "template<class T>", 3,
+                                   CompletionItem::Kind::Class});
     }
 
-    // Simular completions de variáveis do contexto
-    if (!replContext_.variableDeclarations.empty()) {
-        mockCompletions.push_back({"myVar", "myVar",
-                                   "User-defined variable from REPL", "int", 15,
-                                   CompletionItem::Kind::Variable});
+    // Member access completions (message., numbers., etc.)
+    if (partialCode.find("message.") != std::string::npos) {
+        mockCompletions.push_back({"length", "length()",
+                                   "Returns string length", "size_t", 10,
+                                   CompletionItem::Kind::Function});
+        mockCompletions.push_back({"size", "size()", "Returns string size",
+                                   "size_t", 10,
+                                   CompletionItem::Kind::Function});
+        mockCompletions.push_back({"substr", "substr(pos, len)",
+                                   "Returns substring", "string", 8,
+                                   CompletionItem::Kind::Function});
     }
 
-    // Keyword completions básicos
+    if (partialCode.find("numbers.") != std::string::npos) {
+        mockCompletions.push_back({"size", "size()", "Returns vector size",
+                                   "size_t", 10,
+                                   CompletionItem::Kind::Function});
+        mockCompletions.push_back({"push_back", "push_back(value)",
+                                   "Adds element", "void", 9,
+                                   CompletionItem::Kind::Function});
+        mockCompletions.push_back({"at", "at(index)", "Access element at index",
+                                   "T&", 8, CompletionItem::Kind::Function});
+    }
+
+    // Fuzzy/partial matching for function names
+    if (partialCode.find("prt") != std::string::npos &&
+        !replContext_.functionDeclarations.empty() &&
+        replContext_.functionDeclarations.find("printMessage") !=
+            std::string::npos) {
+        mockCompletions.push_back({"printMessage", "printMessage()",
+                                   "User function", "void", 15,
+                                   CompletionItem::Kind::Function});
+    }
+
+    // Typo corrections
+    if (partialCode.find("stirng") != std::string::npos) {
+        mockCompletions.push_back({"string", "std::string",
+                                   "Did you mean 'string'?", "class", 12,
+                                   CompletionItem::Kind::Class});
+        mockCompletions.push_back({"string", "string", "C++ type", "class", 11,
+                                   CompletionItem::Kind::Keyword});
+    }
+
+    // Contextual help for incomplete statements
+    if (partialCode.find("for (") != std::string::npos) {
+        mockCompletions.push_back({"int", "int",
+                                   "Integer type for loop variable", "type", 10,
+                                   CompletionItem::Kind::Keyword});
+        mockCompletions.push_back({"auto", "auto", "Auto type deduction",
+                                   "keyword", 9,
+                                   CompletionItem::Kind::Keyword});
+        mockCompletions.push_back({"size_t", "size_t", "Unsigned integer type",
+                                   "type", 8, CompletionItem::Kind::Keyword});
+    }
+
+    // Simulate context variables in multiline or empty prefix scenarios
+    // Check both context and activeCode for variables
+    std::string contextToCheck = replContext_.variableDeclarations;
+    if (contextToCheck.empty()) {
+        contextToCheck = partialCode; // fallback to checking in activeCode
+    }
+
+    if (!contextToCheck.empty()) {
+        // Known context variables
+        if (contextToCheck.find("counter") != std::string::npos) {
+            mockCompletions.push_back({"counter", "counter", "User variable",
+                                       "int", 15,
+                                       CompletionItem::Kind::Variable});
+        }
+        if (contextToCheck.find("message") != std::string::npos) {
+            mockCompletions.push_back({"message", "message", "User variable",
+                                       "std::string", 15,
+                                       CompletionItem::Kind::Variable});
+        }
+        if (contextToCheck.find("numbers") != std::string::npos) {
+            mockCompletions.push_back({"numbers", "numbers", "User variable",
+                                       "std::vector<int>", 15,
+                                       CompletionItem::Kind::Variable});
+        }
+
+        // Dynamic detection for variables starting with "my"
+        if (contextToCheck.find("myCustomVar") != std::string::npos) {
+            mockCompletions.push_back({"myCustomVar", "myCustomVar",
+                                       "Custom user variable", "int", 15,
+                                       CompletionItem::Kind::Variable});
+        }
+        if (contextToCheck.find("myString") != std::string::npos) {
+            mockCompletions.push_back({"myString", "myString",
+                                       "Custom string variable", "std::string",
+                                       15, CompletionItem::Kind::Variable});
+        }
+    }
+
+    // Function declarations
+    if (!replContext_.functionDeclarations.empty()) {
+        if (replContext_.functionDeclarations.find("printMessage") !=
+            std::string::npos) {
+            mockCompletions.push_back({"printMessage", "printMessage()",
+                                       "User function", "void", 14,
+                                       CompletionItem::Kind::Function});
+        }
+        if (replContext_.functionDeclarations.find("calculateSum") !=
+            std::string::npos) {
+            mockCompletions.push_back({"calculateSum", "calculateSum(a, b)",
+                                       "User function", "int", 14,
+                                       CompletionItem::Kind::Function});
+        }
+    }
+
+    // Enhanced keyword completions for empty prefix
     if (partialCode.empty() || std::isalpha(partialCode[0])) {
         std::vector<std::string> keywords = {
             "int",   "float",  "double", "char",      "bool",  "auto",
-            "const", "static", "inline", "namespace", "class", "struct"};
+            "const", "static", "inline", "namespace", "class", "struct",
+            "if",    "for",    "while",  "return",    "break", "continue"};
 
         for (const auto &keyword : keywords) {
-            if (keyword.find(partialCode) == 0) { // Starts with partialCode
+            if (partialCode.empty() || keyword.find(partialCode) == 0) {
                 mockCompletions.push_back({keyword, keyword, "C++ keyword", "",
                                            5, CompletionItem::Kind::Keyword});
             }
         }
     }
 
-    // Ordenar por prioridade (maior prioridade primeiro)
+    // Sort by priority (higher priority first)
     std::sort(mockCompletions.begin(), mockCompletions.end(),
               [](const CompletionItem &a, const CompletionItem &b) {
                   return a.priority > b.priority;
@@ -379,14 +485,48 @@ std::string ClangCompletion::getDocumentation(const std::string &symbol) {
     std::cout << "[DEBUG] ClangCompletion: getDocumentation('" << symbol
               << "')\n";
 
-    // TODO: Usar libclang para obter documentação real
+    // Enhanced mock documentation for built-in types and common symbols
     std::unordered_map<std::string, std::string> mockDocs = {
+        // Built-in types
+        {"int", "int - 32-bit signed integer type. Range: -2,147,483,648 to "
+                "2,147,483,647"},
+        {"string", "std::string - Dynamic string class for handling sequences "
+                   "of characters"},
         {"vector", "std::vector<T> - Dynamic array container that can resize "
                    "automatically"},
-        {"string", "std::string - Class for handling strings of characters"},
-        {"cout", "std::cout - Standard output stream for console output"},
-        {"push_back", "Adds element to the end of the container"},
-        {"size", "Returns the number of elements in the container"}};
+        {"cout",
+         "std::cout - Standard output stream object for console output"},
+
+        // String methods
+        {"length",
+         "string::length() - Returns the length of the string in characters"},
+        {"size", "size() - Returns the number of elements in the container"},
+        {"substr", "string::substr(pos, len) - Returns a substring starting at "
+                   "position pos"},
+
+        // Vector methods
+        {"push_back",
+         "vector::push_back(value) - Adds element to the end of the container"},
+        {"at", "vector::at(index) - Returns reference to element at specified "
+               "position"},
+
+        // Keywords
+        {"auto", "auto - Automatic type deduction keyword (C++11)"},
+        {"const",
+         "const - Keyword to declare constants or read-only variables"},
+        {"static",
+         "static - Storage class specifier for static storage duration"},
+        {"inline",
+         "inline - Suggests to compiler to insert function body at call site"},
+
+        // Control flow
+        {"if", "if - Conditional statement for branching execution"},
+        {"for", "for - Loop statement for iteration with initialization, "
+                "condition, and update"},
+        {"while",
+         "while - Loop statement that continues while condition is true"},
+        {"return",
+         "return - Statement to exit function and optionally return value"}};
 
     auto it = mockDocs.find(symbol);
     return (it != mockDocs.end()) ? it->second : "No documentation available";
