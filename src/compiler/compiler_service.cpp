@@ -20,8 +20,8 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto
-runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
+extern auto runProgramGetOutput(std::string_view cmd)
+    -> std::pair<std::string, int>;
 extern int verbosityLevel;
 
 namespace compiler {
@@ -284,6 +284,12 @@ CompilerResult<std::vector<VarDecl>> CompilerService::buildLibraryWithAST(
         return result;
     }
 
+    auto context = analyzer.getContext();
+    // Salva o header se houve mudanças
+    if (context->hasHeaderChanged()) {
+        context->saveHeaderToFile("decl_amalgama.hpp");
+    }
+
     result.value = std::move(vars);
     return result;
 }
@@ -363,6 +369,8 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     std::vector<VarDecl> allVars;
     int errorCode = 0;
 
+    bool hasChanged = false;
+
     // Process each source file sequentially (simplified from parallel version)
     for (const auto &name : sources) {
         if (name.empty()) {
@@ -408,6 +416,8 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
             errorCode = ares;
             break;
         }
+
+        hasChanged |= analyzer.getContext()->hasHeaderChanged();
 
         allVars.insert(allVars.end(), localVars.begin(), localVars.end());
 
@@ -471,6 +481,11 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     // Merge variables using callback if provided
     if (varMergeCallback_) {
         varMergeCallback_(allVars);
+    }
+
+    // Salva o header se houve mudanças
+    if (hasChanged) {
+        analysis::AstContext::staticSaveHeaderToFile("decl_amalgama.hpp");
     }
 
     result.value.variables = std::move(allVars);

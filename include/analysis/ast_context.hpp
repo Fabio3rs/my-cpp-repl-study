@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../simdjson.h"
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -84,6 +85,8 @@ class AstContext {
      */
     bool saveHeaderToFile(const std::string &filename) const;
 
+    static bool staticSaveHeaderToFile(const std::string &filename);
+
   private:
     /**
      * @brief Header de declarações com duração estática
@@ -155,20 +158,6 @@ class ContextualAstAnalyzer {
         simdjson::simdjson_result<simdjson::ondemand::value> &element,
         const std::filesystem::path &source,
         const std::filesystem::path &lastfile, int64_t lastLine);
-
-    /**
-     * @brief Extrai lista de parâmetros de um tipo de função
-     * @param functionType String do tipo da função
-     * @return Lista de parâmetros
-     */
-    std::string extractParameterList(const std::string &functionType);
-
-    /**
-     * @brief Extrai tipo de retorno de um tipo de função
-     * @param functionType String do tipo da função
-     * @return Tipo de retorno
-     */
-    std::string extractReturnType(const std::string &functionType);
 };
 
 } // namespace analysis

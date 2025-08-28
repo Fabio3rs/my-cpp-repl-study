@@ -7,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <system_error>
 
@@ -70,6 +71,16 @@ void AstContext::clear() {
 }
 
 bool AstContext::saveHeaderToFile(const std::string &filename) const {
+    std::fstream headerOutput(filename, std::ios::out);
+    if (!headerOutput.is_open()) {
+        return false;
+    }
+    headerOutput << outputHeader_ << std::endl;
+    return headerOutput.good();
+}
+
+bool AstContext::staticSaveHeaderToFile(const std::string &filename) {
+    std::scoped_lock<std::mutex> lock(contextWriteMutex);
     std::fstream headerOutput(filename, std::ios::out);
     if (!headerOutput.is_open()) {
         return false;
@@ -381,11 +392,6 @@ int ContextualAstAnalyzer::analyzeASTFromJsonString(
     auto inner = doc["inner"];
     analyzeInnerAST(source, vars, &inner);
 
-    // Salva o header se houve mudanças
-    if (context_->hasHeaderChanged()) {
-        context_->saveHeaderToFile("decl_amalgama.hpp");
-    }
-
     return EXIT_SUCCESS;
 }
 
@@ -394,13 +400,15 @@ int ContextualAstAnalyzer::analyzeASTFile(const std::string &filename,
                                           std::vector<VarDecl> &vars) {
 
     simdjson::padded_string json;
-    std::cout << "loading: " << filename << std::endl;
+    if (::verbosityLevel >= 2) {
+        std::cout << "loading: " << filename << std::endl;
+    }
     auto error = simdjson::padded_string::load(filename).get(json);
     if (error) {
         std::cout << "could not load the file " << filename << std::endl;
         std::cout << "error code: " << error << std::endl;
         return EXIT_FAILURE;
-    } else {
+    } else if (::verbosityLevel >= 2) {
         std::cout << "loaded: " << json.size() << " bytes." << std::endl;
     }
 
@@ -412,21 +420,42 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
     const std::filesystem::path &source, const std::filesystem::path &lastfile,
     int64_t lastLine) {
 
+    using simdjson::ondemand::object;
+
     if (::verbosityLevel >= 4) {
         std::cout << "🔍 extractCompleteClassDefinition called" << std::endl;
     }
 
     try {
-        // Extrair informações básicas da classe/struct
-        auto kind = element["kind"].get_string().value();
-        auto name = element["name"].get_string().value();
+        // Sempre trabalhe em cima de um objeto explicitamente
+        auto obj_res = element.get_object();
+        if (obj_res.error()) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  JSON não é um objeto: " << obj_res.error()
+                          << std::endl;
+            }
+            return;
+        }
+        object obj = obj_res.value();
+
+        // (Opcional) dump para debug sem consumir: to_json_string + reset
+        /*if (::verbosityLevel >= 4) {
+            auto dump = simdjson::to_json_string(obj).value();
+            std::cout << dump << std::endl;
+            obj.reset(); // IMPORTANTE: reposiciona o cursor para continuar
+                         // acessando
+        }*/
+
+        // Campos básicos (ordem indiferente graças ao find_field_unordered)
+        auto kind = obj.find_field_unordered("kind").get_string().value();
+        auto name = obj.find_field_unordered("name").get_string().value();
 
         if (::verbosityLevel >= 4) {
             std::cout << "🔍 Processing " << kind << " named '" << name << "'"
                       << std::endl;
         }
 
-        // Verificar se é do arquivo correto (não de headers incluídos)
+        // Ignorar de outros arquivos
         std::error_code ec;
         if (!source.empty() && !lastfile.empty() &&
             !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
@@ -434,183 +463,154 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
                 std::cout << "🔍 Skipping " << name << " from different file"
                           << std::endl;
             }
-            return; // Skip classes from included headers
+            return;
         }
 
-        // Verificar se é uma definição completa (não implicit)
-        auto isImplicit = element["isImplicit"];
-        if (!isImplicit.error() && isImplicit.get_bool().value()) {
-            if (::verbosityLevel >= 4) {
+        // Ignorar implícitos
+        auto isImplicit_val = obj.find_field_unordered("isImplicit");
+        if (!isImplicit_val.error() && isImplicit_val.get_bool().value()) {
+            if (::verbosityLevel >= 4)
                 std::cout << "🔍 Skipping implicit " << name << std::endl;
-            }
-            return; // Skip implicit declarations
+            return;
         }
 
-        // Verificar se é uma definição completa
-        auto completeDefinition = element["completeDefinition"];
+        // Verificar definição completa
+        auto completeDefinition =
+            obj.find_field_unordered("completeDefinition");
         if (completeDefinition.error() ||
             !completeDefinition.get_bool().value()) {
             if (::verbosityLevel >= 4) {
                 std::cout << "🔍 Skipping incomplete definition of " << name
                           << std::endl;
             }
-            return; // Skip incomplete definitions
+            return;
         }
 
-        // Iniciar a definição
-        std::string definition;
-        bool isStruct = false;
-
-        // Verificar se é struct ou class pelo tagUsed
-        auto tagUsed = element["tagUsed"];
-        if (!tagUsed.error()) {
-            auto tagUsedStr = tagUsed.get_string().value();
-            isStruct = (tagUsedStr == "struct");
-            definition += std::format("{} ", tagUsedStr);
-        } else if (kind == "CXXRecordDecl") {
-            // Fallback: assumir class por padrão para CXXRecordDecl
-            definition += "class ";
-        } else {
-            // RecordDecl (struct em C)
-            definition += "struct ";
-            isStruct = true;
-        }
-
-        definition += std::format("{} {{\n", name);
-
-        // Processar membros da classe/struct
-        auto inner = element["inner"];
-        if (!inner.error() &&
-            inner.type() == simdjson::ondemand::json_type::array) {
-            auto innerArray = inner.get_array();
-
-            std::string publicSection, privateSection, protectedSection;
-            std::string *currentSection =
-                isStruct ? &publicSection : &privateSection;
-
-            if (::verbosityLevel >= 4) {
-                std::cout << "🔍 Processing " << (isStruct ? "struct" : "class")
-                          << " " << name << " with default "
-                          << (isStruct ? "public" : "private") << " access"
-                          << std::endl;
-            }
-
-            for (auto member : innerArray) {
-                auto memberKind = member["kind"];
-                if (memberKind.error())
-                    continue;
-
-                auto memberKindStr = memberKind.get_string().value();
-
-                // Processar AccessSpecDecl (public:, private:, protected:)
-                if (memberKindStr == "AccessSpecDecl") {
-                    auto access = member["access"];
-                    if (!access.error()) {
-                        auto accessStr = access.get_string().value();
-                        if (accessStr == "public") {
-                            currentSection = &publicSection;
-                        } else if (accessStr == "private") {
-                            currentSection = &privateSection;
-                        } else if (accessStr == "protected") {
-                            currentSection = &protectedSection;
-                        }
-                    }
-                    continue;
-                }
-
-                // Processar variáveis membro
-                if (memberKindStr == "FieldDecl") {
-                    auto memberName = member["name"];
-                    auto memberType = member["type"]["qualType"];
-
-                    if (!memberName.error() && !memberType.error()) {
-                        auto memberNameStr = memberName.get_string().value();
-                        auto memberTypeStr = memberType.get_string().value();
-
-                        if (::verbosityLevel >= 4) {
-                            std::cout << "🔧 Adding field: " << memberTypeStr
-                                      << " " << memberNameStr << std::endl;
-                        }
-
-                        *currentSection += std::format(
-                            "    {} {};\n", memberTypeStr, memberNameStr);
-                    }
-                }
-
-                // Processar métodos
-                if (memberKindStr == "CXXMethodDecl" ||
-                    memberKindStr == "CXXConstructorDecl" ||
-                    memberKindStr == "CXXDestructorDecl") {
-                    auto memberName = member["name"];
-                    auto memberType = member["type"]["qualType"];
-
-                    if (!memberName.error() && !memberType.error()) {
-                        auto memberNameStr = memberName.get_string().value();
-                        auto memberTypeStr = memberType.get_string().value();
-
-                        // Extrair apenas a declaração do método (não
-                        // implementação)
-                        if (memberKindStr == "CXXConstructorDecl") {
-                            if (::verbosityLevel >= 4) {
-                                std::cout << "🔧 Adding constructor: " << name
-                                          << "("
-                                          << extractParameterList(
-                                                 std::string(memberTypeStr))
-                                          << ")" << std::endl;
-                            }
-                            *currentSection +=
-                                std::format("    {}({});\n", name,
-                                            extractParameterList(
-                                                std::string(memberTypeStr)));
-                        } else if (memberKindStr == "CXXDestructorDecl") {
-                            if (::verbosityLevel >= 4) {
-                                std::cout << "🔧 Adding destructor: ~" << name
-                                          << std::endl;
-                            }
-                            *currentSection +=
-                                std::format("    ~{}();\n", name);
-                        } else {
-                            // Método normal
-                            std::string memberTypeString(memberTypeStr);
-                            auto returnType =
-                                extractReturnType(memberTypeString);
-                            auto params =
-                                extractParameterList(memberTypeString);
-                            if (::verbosityLevel >= 4) {
-                                std::cout << "🔧 Adding method: " << returnType
-                                          << " " << memberNameStr << "("
-                                          << params << ")" << std::endl;
-                            }
-                            *currentSection +=
-                                std::format("    {} {}({});\n", returnType,
-                                            memberNameStr, params);
-                        }
-                    }
-                }
-            }
-
-            // Montar a definição final com as seções
-            if (!publicSection.empty()) {
-                definition += "public:\n" + publicSection;
-            }
-            if (!protectedSection.empty()) {
-                definition += "protected:\n" + protectedSection;
-            }
-            if (!privateSection.empty()) {
-                definition += "private:\n" + privateSection;
-            }
-        }
-
-        definition += "};\n";
-
-        // Adicionar ao contexto
-        if (::verbosityLevel >= 3) {
-            std::cout << "📝 Adding complete class definition: " << name
+        if (::verbosityLevel >= 4) {
+            std::cout << "🔍 Debug: Attempting to access range for " << name
                       << std::endl;
         }
+        if (::verbosityLevel >= 3) {
+            std::cout << "📝 extractCompleteClassDefinition reached for: "
+                      << name << std::endl;
+        }
+        if (::verbosityLevel >= 2) {
+            std::cout << "⚠️  Source extraction not implemented yet for: "
+                      << name << std::endl;
+        }
 
-        context_->addLineDirective(lastLine, lastfile);
-        context_->addDeclaration(definition);
+        // ---- Extração dos offsets via find_field_unordered ----
+        auto range_obj = obj.find_field_unordered("range").get_object();
+        if (range_obj.error()) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  No range info for: " << name << " "
+                          << range_obj.error() << std::endl;
+            }
+            return;
+        }
+        auto range = range_obj.value();
+
+        /*if (::verbosityLevel >= 4) {
+            auto dump = simdjson::to_json_string(range).value();
+            std::cout << "Range found for " << name << ": " << dump << "\n";
+            range.reset(); // <<< fundamental se você for acessar 'begin' e
+                           // 'end' depois
+        }*/
+
+        auto begin = range.find_field_unordered("begin").get_object().value();
+
+        auto begin_offset_res =
+            begin.find_field_unordered("offset").get_int64();
+        if (begin_offset_res.error()) {
+            if (::verbosityLevel >= 1) {
+                auto dump = simdjson::to_json_string(begin).value();
+                std::cerr << "⚠️  No begin offset for: " << name << " "
+                          << begin_offset_res.error() << "  " << dump
+                          << std::endl;
+                begin.reset();
+            }
+            return;
+        }
+        auto end = range.find_field_unordered("end").get_object().value();
+        auto end_offset_res = end.find_field_unordered("offset").get_int64();
+        auto tokLeng = end.find_field_unordered("tokLen").get_int64();
+        if (end_offset_res.error()) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  No end offset for: " << name << " "
+                          << end_offset_res.error() << "  " << end << std::endl;
+            }
+            return;
+        }
+
+        if (tokLeng.error()) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  No tokLen for: " << name << " "
+                          << tokLeng.error() << "  " << end << std::endl;
+            }
+            return;
+        }
+
+        const int64_t begin_value = begin_offset_res.value();
+        const int64_t end_value = end_offset_res.value();
+        const int64_t tok_length = tokLeng.value();
+
+        if (begin_value >= end_value) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  Invalid range offsets for: " << name
+                          << std::endl;
+            }
+            return;
+        }
+
+        // ---- Leitura ipsis litteris do trecho do arquivo-fonte ----
+        std::fstream sourceFileStream(lastfile,
+                                      std::ios::in | std::ios::binary);
+        if (!sourceFileStream.is_open()) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  Could not open source file: " << lastfile
+                          << std::endl;
+            }
+            return;
+        }
+
+        sourceFileStream.seekg(0, std::ios::end);
+        const auto fileSize = static_cast<int64_t>(sourceFileStream.tellg());
+        sourceFileStream.seekg(0, std::ios::beg);
+
+        if (begin_value < 0 || end_value < 0 || begin_value >= fileSize ||
+            end_value > fileSize) {
+            if (::verbosityLevel >= 1) {
+                std::cerr << "⚠️  Range offsets out of bounds for file: "
+                          << lastfile << std::endl;
+            }
+            return;
+        }
+
+        const size_t length =
+            static_cast<size_t>((end_value - begin_value) + tok_length);
+        std::string sourceDefinition;
+        sourceDefinition.reserve(length + 1);
+
+        sourceFileStream.seekg(begin_value, std::ios::beg);
+        std::copy_n(std::istreambuf_iterator<char>(sourceFileStream), length,
+                    std::back_insert_iterator<std::string>(sourceDefinition));
+        sourceFileStream.close();
+
+        sourceDefinition.push_back(';');
+
+        if (!sourceDefinition.empty()) {
+            if (::verbosityLevel >= 3) {
+                std::cout << "Copying source definition ipsis litteris: "
+                          << name << std::endl;
+            }
+            context_->addLineDirective(lastLine, lastfile);
+            context_->addDeclaration(sourceDefinition);
+        } else {
+            if (::verbosityLevel >= 2) {
+                std::cout << "⚠️  Failed to extract source definition for: "
+                          << name << std::endl;
+            }
+        }
 
     } catch (const std::exception &e) {
         if (::verbosityLevel >= 1) {
@@ -623,32 +623,6 @@ void ContextualAstAnalyzer::extractCompleteClassDefinition(
                       << std::endl;
         }
     }
-}
-
-// Função auxiliar para extrair lista de parâmetros
-std::string
-ContextualAstAnalyzer::extractParameterList(const std::string &functionType) {
-    size_t start = functionType.find('(');
-    size_t end = functionType.find_last_of(')');
-
-    if (start != std::string::npos && end != std::string::npos && end > start) {
-        return functionType.substr(start + 1, end - start - 1);
-    }
-
-    return "";
-}
-
-// Função auxiliar para extrair tipo de retorno
-std::string
-ContextualAstAnalyzer::extractReturnType(const std::string &functionType) {
-    size_t parenPos = functionType.find('(');
-    if (parenPos != std::string::npos) {
-        std::string returnType = functionType.substr(0, parenPos);
-        // Remove espaços em branco no final
-        returnType.erase(returnType.find_last_not_of(" \t\n\v\f\r") + 1);
-        return returnType.empty() ? "void" : returnType;
-    }
-    return "void";
 }
 
 } // namespace analysis

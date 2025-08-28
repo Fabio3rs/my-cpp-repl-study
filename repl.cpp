@@ -414,10 +414,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -665,7 +666,8 @@ void prepareFunctionWrapper(
 
     for (const auto &fnvars : vars) {
         std::cout << fnvars.name << std::endl;
-        if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl") {
+        if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl" &&
+            fnvars.kind != "CXXConstructorDecl") {
             continue;
         }
 
