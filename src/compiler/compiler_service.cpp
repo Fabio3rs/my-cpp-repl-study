@@ -20,8 +20,8 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto
-runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
+extern auto runProgramGetOutput(std::string_view cmd)
+    -> std::pair<std::string, int>;
 extern int verbosityLevel;
 
 namespace compiler {
@@ -507,111 +507,109 @@ CompilerResult<std::vector<std::string>> CompilerService::analyzeCustomCommands(
     std::vector<std::string> errors;
     std::mutex errorsMutex;
 
-    // Processa os comandos em paralelo
-    std::for_each(
-        std::execution::par_unseq, commands.begin(), commands.end(),
-        [&](const std::string &cmd) {
-            try {
-                // Executa o comando usando executeCommand
-                auto cmdResult = executeCommand(cmd);
+    auto evalcmd = [&](const std::string &cmd) {
+        try {
+            // Executa o comando usando executeCommand
+            auto cmdResult = executeCommand(cmd);
 
-                if (!cmdResult.success()) {
-                    std::lock_guard<std::mutex> lock(errorsMutex);
-                    errors.push_back("Erro ao executar comando: " + cmd);
+            if (!cmdResult.success()) {
+                std::lock_guard<std::mutex> lock(errorsMutex);
+                errors.push_back("Erro ao executar comando: " + cmd);
+                return;
+            }
+
+            // Processa o JSON de saída se o comando contém -ast-dump
+            if (cmd.find("-ast-dump") == std::string::npos) {
+                return;
+            }
+
+            // Extrai o arquivo JSON do comando
+            std::string jsonFile;
+            size_t jsonPos = cmd.find(" > ");
+            if (jsonPos != std::string::npos) {
+                jsonFile = cmd.substr(jsonPos + 3);
+                // Remove espaços e quebras de linha
+                jsonFile.erase(jsonFile.find_last_not_of(" \n\r\t") + 1);
+            }
+
+            if (jsonFile.empty()) {
+                return;
+            }
+            // Usa simdjson para analisar o arquivo
+
+            std::ifstream file(jsonFile);
+            if (!file.is_open()) {
+                return;
+            }
+
+            std::string content((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+
+            // Análise com simdjson (similar ao código original)
+            simdjson::dom::parser parser;
+            simdjson::dom::element doc;
+            auto error = parser.parse(content).get(doc);
+
+            if (error != simdjson::SUCCESS) {
+                std::lock_guard<std::mutex> lock(errorsMutex);
+                errors.push_back("Erro ao analisar JSON: " + jsonFile);
+                return;
+            }
+
+            // Função recursiva para extrair declarações
+            std::function<void(simdjson::dom::element)> extractDecls;
+            std::vector<std::string> localVars;
+
+            extractDecls = [&](simdjson::dom::element node) {
+                if (!node.is_object()) {
                     return;
                 }
 
-                // Processa o JSON de saída se o comando contém -ast-dump
-                if (cmd.find("-ast-dump") != std::string::npos) {
-                    // Extrai o arquivo JSON do comando
-                    std::string jsonFile;
-                    size_t jsonPos = cmd.find(" > ");
-                    if (jsonPos != std::string::npos) {
-                        jsonFile = cmd.substr(jsonPos + 3);
-                        // Remove espaços e quebras de linha
-                        jsonFile.erase(jsonFile.find_last_not_of(" \n\r\t") +
-                                       1);
-                    }
+                simdjson::dom::object obj = node;
 
-                    if (!jsonFile.empty()) {
-                        // Usa simdjson para analisar o arquivo
-                        std::ifstream file(jsonFile);
-                        if (file.is_open()) {
-                            std::string content(
-                                (std::istreambuf_iterator<char>(file)),
-                                std::istreambuf_iterator<char>());
+                // Verifica se é uma declaração de
+                // variável/função
+                auto kind = obj["kind"];
+                auto name = obj["name"];
 
-                            // Análise com simdjson (similar ao código original)
-                            simdjson::dom::parser parser;
-                            simdjson::dom::element doc;
-                            auto error = parser.parse(content).get(doc);
+                if (!kind.error() && !name.error()) {
+                    std::string_view kindStr = kind;
+                    std::string_view nameStr = name;
 
-                            if (!error) {
-                                // Função recursiva para extrair declarações
-                                std::function<void(simdjson::dom::element)>
-                                    extractDecls;
-                                std::vector<std::string> localVars;
-
-                                extractDecls =
-                                    [&](simdjson::dom::element node) {
-                                        if (node.is_object()) {
-                                            simdjson::dom::object obj = node;
-
-                                            // Verifica se é uma declaração de
-                                            // variável/função
-                                            auto kind = obj["kind"];
-                                            auto name = obj["name"];
-
-                                            if (!kind.error() &&
-                                                !name.error()) {
-                                                std::string_view kindStr = kind;
-                                                std::string_view nameStr = name;
-
-                                                if (kindStr == "VarDecl" ||
-                                                    kindStr == "FunctionDecl" ||
-                                                    kindStr ==
-                                                        "CXXMethodDecl" ||
-                                                    kindStr == "FieldDecl") {
-                                                    localVars.push_back(
-                                                        std::string(nameStr));
-                                                }
-                                            }
-
-                                            // Processa filhos recursivamente
-                                            auto inner = obj["inner"];
-                                            if (!inner.error() &&
-                                                inner.is_array()) {
-                                                for (auto child : inner) {
-                                                    extractDecls(child);
-                                                }
-                                            }
-                                        }
-                                    };
-
-                                extractDecls(doc);
-
-                                // Adiciona variáveis encontradas ao resultado
-                                if (!localVars.empty()) {
-                                    std::lock_guard<std::mutex> lock(varsMutex);
-                                    allVars.insert(allVars.end(),
-                                                   localVars.begin(),
-                                                   localVars.end());
-                                }
-                            } else {
-                                std::lock_guard<std::mutex> lock(errorsMutex);
-                                errors.push_back("Erro ao analisar JSON: " +
-                                                 jsonFile);
-                            }
-                        }
+                    if (kindStr == "VarDecl" || kindStr == "FunctionDecl" ||
+                        kindStr == "CXXMethodDecl" || kindStr == "FieldDecl") {
+                        localVars.push_back(std::string(nameStr));
                     }
                 }
 
-            } catch (const std::exception &e) {
-                std::lock_guard<std::mutex> lock(errorsMutex);
-                errors.push_back("Exceção durante análise: " +
-                                 std::string(e.what()));
+                // Processa filhos recursivamente
+                auto inner = obj["inner"];
+                if (!inner.error() && inner.is_array()) {
+                    for (auto child : inner) {
+                        extractDecls(child);
+                    }
+                }
+            };
+
+            extractDecls(doc);
+
+            // Adiciona variáveis encontradas ao resultado
+            if (localVars.empty()) {
+                return;
             }
-        });
+
+            std::lock_guard<std::mutex> lock(varsMutex);
+            allVars.insert(allVars.end(), localVars.begin(), localVars.end());
+        } catch (const std::exception &e) {
+            std::lock_guard<std::mutex> lock(errorsMutex);
+            errors.push_back("Exceção durante análise: " +
+                             std::string(e.what()));
+        }
+    };
+
+    // Processa os comandos em paralelo
+    std::for_each(std::execution::par_unseq, commands.begin(), commands.end(),
+                  evalcmd);
 
     // Verifica se houve erros
     if (!errors.empty()) {

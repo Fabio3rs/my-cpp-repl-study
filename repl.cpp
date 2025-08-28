@@ -415,10 +415,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -927,48 +928,57 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         if (std::regex_search(line, match, includePattern)) {
             if (match.size() > 1) {
-                std::cout << "File name: " << match[1] << std::endl;
+                std::string fileName = match[1].str();
+                std::cout << std::format("📁 Including file: {}\n", fileName);
 
-                std::filesystem::path p(match[1]);
+                std::filesystem::path p(fileName);
 
                 try {
                     p = std::filesystem::absolute(
                         std::filesystem::canonical(p));
-                } catch (...) {
+                    std::cout
+                        << std::format("   → Resolved path: {}\n", p.string());
+                } catch (const std::filesystem::filesystem_error &e) {
+                    std::cout << std::format(
+                        "   ⚠️  Warning: Could not resolve path - {}\n",
+                        e.what());
                 }
-
-                std::string path = p.string();
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
                     // TODO: Implementar recompilação baseada em contexto AST
                     replState.shouldRecompilePrecompiledHeader = true;
+                    std::cout
+                        << "   🔄 Marked for precompiled header rebuild\n";
                 }
             } else {
-                std::cout << "File name not found" << std::endl;
+                std::cerr << "❌ Error: Could not parse include directive\n";
                 return true;
             }
         } else {
-            std::cout << "File name not found" << std::endl;
+            std::cerr << "❌ Error: Invalid include syntax. Use: #include "
+                         "<header> or #include \"header\"\n";
             return true;
         }
         return true;
     }
 
     if (replState.shouldRecompilePrecompiledHeader) {
+        std::cout << "🔨 Rebuilding precompiled header...\n";
         build_precompiledheader();
         replState.shouldRecompilePrecompiledHeader = false;
+        std::cout << "✅ Precompiled header rebuilt successfully\n";
     }
 
     if (line == "printall") {
-        std::cout << "printall" << std::endl;
-
+        std::cout << "📊 Printing all variables...\n";
         savePrintAllVarsLibrary(replState.allTheVariables);
         runPrintAll();
         return true;
     }
 
     if (line == "evalall") {
+        std::cout << "⚡ Evaluating all lazy expressions...\n";
         evalEverything();
         return true;
     }
@@ -979,13 +989,17 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         auto it = replState.varPrinterAddresses.find(line);
 
         if (it != replState.varPrinterAddresses.end()) {
+            std::cout << std::format("🔍 Printing variable: {}\n", line);
             it->second();
             return true;
         } else {
-            std::cout << "not found" << std::endl;
+            std::cerr << std::format("❌ Error: Variable '{}' found in names "
+                                     "but not in printer addresses\n",
+                                     line);
         }
 
-        std::cout << "printdata(" << line << ");" << std::endl;
+        std::cout << std::format("🔧 Generating printer for variable: {}\n",
+                                 line);
 
         std::fstream printerOutput("printerOutput.cpp",
                                    std::ios::out | std::ios::trunc);
@@ -993,13 +1007,12 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
 
         printerOutput << "void printall() {\n";
-
-        printerOutput << "printdata(" << line << ");\n";
-
+        printerOutput << std::format("    printdata({});\n", line);
         printerOutput << "}\n";
 
         printerOutput.close();
 
+        std::cout << "📦 Building printer library...\n";
         onlyBuildLib("clang++", "printerOutput");
 
         runPrintAll();
@@ -1031,32 +1044,30 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         if (std::filesystem::exists(line)) {
             cfg.fileWrap = false;
-
             cfg.sourcesList.push_back(line);
             auto textension = line.substr(line.find_last_of('.') + 1);
-            /*std::fstream file(line, std::ios::in);
 
-
-            line.clear();
-            std::copy(std::istreambuf_iterator<char>(file),
-                      std::istreambuf_iterator<char>(),
-                      std::back_inserter(line));*/
-
-            std::cout << "extension: " << textension << std::endl;
+            std::cout << std::format("📄 Processing file: {} (extension: {})\n",
+                                     line, textension);
 
             if (textension == "h" || textension == "hpp") {
                 cfg.addIncludes = false;
+                std::cout << "   → Header file detected - includes disabled\n";
             }
 
-            cfg.use_cpp2 = (textension == "cpp2");
+            if (textension == "cpp2") {
+                cfg.use_cpp2 = true;
+                std::cout << "   → cpp2 mode enabled\n";
+            }
 
             if (textension == "c") {
                 cfg.extension = textension;
                 cfg.analyze = false;
                 cfg.addIncludes = false;
-
                 cfg.std = "c17";
                 cfg.compiler = "clang";
+                std::cout << "   → C source detected - using clang with C17 "
+                             "standard\n";
             }
         } else {
             // Detecção inteligente: definição vs código executável
@@ -1064,6 +1075,10 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 // É uma definição - adiciona ao escopo global sem exec()
                 if (verbosityLevel >= 2) {
                     std::cout << "🔧 Detected global definition\n";
+                } else if (verbosityLevel >= 1) {
+                    std::cout << std::format(
+                        "🔧 Global definition: {}\n",
+                        line.length() > 50 ? line.substr(0, 47) + "..." : line);
                 }
                 // Não envolver em exec(), deixar como definição global
                 cfg.analyze = true; // Queremos analisar definições para AST
@@ -1071,19 +1086,28 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 // É código executável - envolver em exec()
                 if (verbosityLevel >= 2) {
                     std::cout << "⚡ Detected executable code\n";
+                } else if (verbosityLevel >= 1) {
+                    std::cout << std::format(
+                        "⚡ Executable: {}\n",
+                        line.length() > 50 ? line.substr(0, 47) + "..." : line);
                 }
-                line = "void exec() { " + line + "; }\n";
+                line = std::format("void exec() {{ {}; }}\n", line);
                 cfg.analyze = false;
             }
         }
     }
 
     if (line.starts_with("#return ")) {
-        line = line.substr(8);
+        std::string expression = line.substr(8);
 
-        line = "void exec() { printdata(((" + line + ")), " +
-               utility::quote(line) + ", typeid(decltype((" + line +
-               "))).name()); }\n";
+        if (verbosityLevel >= 1) {
+            std::cout << std::format("🔍 Evaluating expression: {}\n",
+                                     expression);
+        }
+
+        line = std::format("void exec() {{ printdata((({0})), {1}, "
+                           "typeid(decltype(({0}))).name()); }}",
+                           expression, utility::quote(expression));
 
         cfg.analyze = false;
     }
@@ -1145,14 +1169,22 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
             // É uma definição - mantém no escopo global
             if (verbosityLevel >= 2) {
                 std::cout << "🔧 Global definition detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "🔧 Definition: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
             }
             cfg.analyze = true; // Analisar AST para definições
         } else {
             // É código executável - envolver em exec()
             if (verbosityLevel >= 2) {
                 std::cout << "⚡ Executable code detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "⚡ Code: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
             }
-            line = "void exec() { " + line + "; }\n";
+            line = std::format("void exec() {{ {}; }}\n", line);
             cfg.analyze = false;
         }
     }
@@ -1160,10 +1192,14 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     cfg.repl_name = std::format("repl_{}", i++);
 
     if (cfg.fileWrap) {
-        std::fstream replOutput(
-            std::format("{}.{}", cfg.repl_name,
-                        (cfg.use_cpp2 ? "cpp2" : cfg.extension)),
-            std::ios::out | std::ios::trunc);
+        std::string fileName = std::format(
+            "{}.{}", cfg.repl_name, (cfg.use_cpp2 ? "cpp2" : cfg.extension));
+
+        if (verbosityLevel >= 2) {
+            std::cout << std::format("📝 Writing source to: {}\n", fileName);
+        }
+
+        std::fstream replOutput(fileName, std::ios::out | std::ios::trunc);
 
         if (cfg.addIncludes) {
             replOutput << "#include \"precompiledheader.hpp\"\n\n";
@@ -1171,24 +1207,41 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         }
 
         replOutput << line << std::endl;
-
         replOutput.close();
     }
 
     if (cfg.use_cpp2) {
-        int cppfrontres =
-            system(("./cppfront " + cfg.repl_name + ".cpp2").c_str());
+        std::string cppfrontCmd =
+            std::format("./cppfront {}.cpp2", cfg.repl_name);
+
+        if (verbosityLevel >= 1) {
+            std::cout << std::format("🔄 Running cppfront: {}\n", cppfrontCmd);
+        }
+
+        int cppfrontres = system(cppfrontCmd.c_str());
 
         if (cppfrontres != 0) {
-            std::cerr << "cppfrontres != 0: " << cfg.repl_name << std::endl;
+            std::cerr << std::format(
+                "❌ cppfront failed with code {} for: {}\n", cppfrontres,
+                cfg.repl_name);
             return false;
         }
+    }
+
+    if (verbosityLevel >= 1) {
+        std::cout << std::format("🚀 Compiling and executing: {}\n",
+                                 cfg.repl_name);
     }
 
     auto evalRes = compileAndRunCode(std::move(cfg));
 
     if (evalRes.success) {
         replState.evalResults.insert_or_assign(line, evalRes);
+        if (verbosityLevel >= 2) {
+            std::cout << "✅ Command executed successfully and cached\n";
+        }
+    } else if (verbosityLevel >= 1) {
+        std::cout << "❌ Command execution failed\n";
     }
 
     return true;
