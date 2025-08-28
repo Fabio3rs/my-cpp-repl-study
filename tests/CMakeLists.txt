@@ -38,6 +38,22 @@ if (GTest_FOUND)
     target_link_libraries(utility_tests cpprepl_lib GTest::GTest GTest::Main segvcatch)
     gtest_discover_tests(utility_tests)
 
+    # Conditional completion tests (only if libclang is available)
+    if(Clang_FOUND)
+        message(STATUS "Adding completion tests (Clang available)")
+        add_executable(completion_tests 
+            completion/test_clang_completion.cpp
+            completion/test_readline_integration.cpp
+            test_helpers/temp_directory_fixture.hpp
+        )
+        target_include_directories(completion_tests PRIVATE ${CMAKE_SOURCE_DIR})
+        target_link_libraries(completion_tests cpprepl_lib GTest::GTest GTest::Main segvcatch)
+        target_compile_definitions(completion_tests PUBLIC CLANG_COMPLETION_ENABLED)
+        gtest_discover_tests(completion_tests)
+    else()
+        message(STATUS "Skipping completion tests (libclang not available)")
+    endif()
+
 else()
     message(STATUS "GTest not found")
 endif()
