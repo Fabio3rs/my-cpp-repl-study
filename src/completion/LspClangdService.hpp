@@ -444,43 +444,4 @@ class LspClangdService {
             initOpts["compilationDatabasePath"] = opts_.compileCommandsDir;
         return initOpts;
     }
-
-    // ===== Tipos que você referenciou =====
-    struct CompilerCodeCfg {
-        std::string compiler = "clang++";
-        std::string std = "gnu++20";
-        std::string extension = "cpp";
-        std::string repl_name;
-        std::string libraryName;
-        std::string wrapperName;
-        std::vector<std::string> sourcesList;
-        bool analyze = true;
-        bool addIncludes = true;
-        bool fileWrap = true;
-        bool lazyEval = false;
-        bool use_cpp2 = false;
-    };
-    struct BuildSettings {
-        std::unordered_set<std::string> linkLibraries;
-        std::unordered_set<std::string> includeDirectories;
-        std::unordered_set<std::string> preprocessorDefinitions;
-        std::string getLinkLibrariesStr() const {
-            std::string s = " -L./ ";
-            for (const auto &lib : linkLibraries)
-                s += " -l" + lib;
-            return s;
-        }
-        std::string getIncludeDirectoriesStr() const {
-            std::string s;
-            for (const auto &dir : includeDirectories)
-                s += " -I" + dir;
-            return s;
-        }
-        std::string getPreprocessorDefinitionsStr() const {
-            std::string s;
-            for (const auto &def : preprocessorDefinitions)
-                s += " -D" + def;
-            return s;
-        }
-    };
 };
