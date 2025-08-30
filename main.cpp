@@ -121,6 +121,12 @@ void handle_fpe(const segvcatch::hardware_exception_info &info) {
         info);
 }
 
+void handle_sigill(const segvcatch::hardware_exception_info &info) {
+    throw segvcatch::illegal_instruction(
+        std::format("SIGILL at: {}", reinterpret_cast<uintptr_t>(info.addr)),
+        info);
+}
+
 void segfaultHandler(int sig) {
     std::cerr << "Segmentation fault AAAAAAAAAAAAAA" << std::endl;
 
@@ -275,6 +281,8 @@ int main(int argc, char **argv) {
     if (enableSignalHandlers) {
         segvcatch::init_segv(&handle_segv);
         segvcatch::init_fpe(&handle_fpe);
+        segvcatch::init_sigill(&handle_sigill);
+
         installCtrlCHandler();
         if (localVerbosityLevel >= 2) {
             std::cout << std::format(

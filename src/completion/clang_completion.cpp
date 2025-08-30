@@ -1,4 +1,5 @@
 #include "../include/completion/clang_completion.hpp"
+#include "../../repl.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -148,7 +149,7 @@ class CCActionFactory : public clang::tooling::FrontendActionFactory {
 
 ClangCompletion::ClangCompletion() {
 #ifdef CLANG_COMPLETION_ENABLED
-    initializeClang();
+    initializeClang({});
     std::cout << "[DEBUG] ClangCompletion: Constructor (LibTooling enabled)\n";
 #else
     initializeClang(); // Mock initialization
@@ -163,8 +164,12 @@ ClangCompletion::~ClangCompletion() {
     std::cout << "[DEBUG] ClangCompletion: Destructor\n";
 }
 
+void ClangCompletion::initialize(const BuildSettings &settings) {
+    initializeClang(settings);
+}
+
 #ifdef CLANG_COMPLETION_ENABLED
-void ClangCompletion::initializeClang() {
+void ClangCompletion::initializeClang(const BuildSettings &settings) {
     // Configurar argumentos para LibTooling
     compiler_args_ = {
         "-std=c++20", "-Wall", "-Wextra", "-I/usr/include",
@@ -529,7 +534,10 @@ std::string ClangCompletion::getDocumentation(const std::string &symbol) {
          "return - Statement to exit function and optionally return value"}};
 
     auto it = mockDocs.find(symbol);
-    return (it != mockDocs.end()) ? it->second : "No documentation available";
+    return (it != mockDocs.end())
+               ? it->second
+               : ("Symbol '" + symbol +
+                  "' - No specific documentation available.");
 }
 
 std::vector<std::string>

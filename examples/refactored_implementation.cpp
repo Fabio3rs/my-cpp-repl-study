@@ -19,7 +19,7 @@ private:
     std::filesystem::path path_;
 
 public:
-    explicit ScopedLibrary(const std::filesystem::path& path) 
+    explicit ScopedLibrary(const std::filesystem::path& path)
         : handle_(nullptr), path_(path) {
         handle_ = dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
         if (!handle_) {
@@ -37,7 +37,7 @@ public:
     ScopedLibrary(const ScopedLibrary&) = delete;
     ScopedLibrary& operator=(const ScopedLibrary&) = delete;
 
-    ScopedLibrary(ScopedLibrary&& other) noexcept 
+    ScopedLibrary(ScopedLibrary&& other) noexcept
         : handle_(other.handle_), path_(std::move(other.path_)) {
         other.handle_ = nullptr;
     }
@@ -62,14 +62,14 @@ public:
 
         // Clear any existing error
         dlerror();
-        
+       
         void* sym = dlsym(handle_, name.c_str());
         const char* error = dlerror();
-        
+       
         if (error) {
             return std::unexpected(ExecutionError::SymbolNotFound);
         }
-        
+       
         return reinterpret_cast<T*>(sym);
     }
 
@@ -83,9 +83,9 @@ private:
     mutable std::shared_mutex mutex_;
     interfaces::CompilerConfig config_;
     std::string session_id_;
-    
+   
 public:
-    explicit ReplContext(const std::string& session_id = "default") 
+    explicit ReplContext(const std::string& session_id = "default")
         : session_id_(session_id) {
         // Initialize default configuration
         config_.compiler_path = "clang++";
@@ -105,7 +105,7 @@ public:
 
     void addIncludeDirectory(const std::filesystem::path& path) override {
         std::unique_lock lock(mutex_);
-        auto it = std::find(config_.include_directories.begin(), 
+        auto it = std::find(config_.include_directories.begin(),
                            config_.include_directories.end(), path);
         if (it == config_.include_directories.end()) {
             config_.include_directories.push_back(path);
@@ -128,7 +128,7 @@ public:
 
     void addLinkLibrary(const std::string& library) override {
         std::unique_lock lock(mutex_);
-        auto it = std::find(config_.link_libraries.begin(), 
+        auto it = std::find(config_.link_libraries.begin(),
                            config_.link_libraries.end(), library);
         if (it == config_.link_libraries.end()) {
             config_.link_libraries.push_back(library);
@@ -151,7 +151,7 @@ public:
 
     void addPreprocessorDefinition(const std::string& definition) override {
         std::unique_lock lock(mutex_);
-        auto it = std::find(config_.preprocessor_definitions.begin(), 
+        auto it = std::find(config_.preprocessor_definitions.begin(),
                            config_.preprocessor_definitions.end(), definition);
         if (it == config_.preprocessor_definitions.end()) {
             config_.preprocessor_definitions.push_back(definition);
@@ -196,69 +196,69 @@ private:
                                    const std::filesystem::path& source_file,
                                    const std::filesystem::path& output_file) {
         std::ostringstream cmd;
-        
+       
         cmd << config.compiler_path;
         cmd << " -shared -fPIC";
         cmd << " -std=" << config.std_version;
-        
+       
         if (config.enable_debug_info) {
             cmd << " -g";
         }
-        
+       
         if (config.enable_optimization) {
             cmd << " -O2";
         }
-        
+       
         // Add include directories
         for (const auto& inc_dir : config.include_directories) {
             cmd << " -I" << inc_dir;
         }
-        
+       
         // Add preprocessor definitions
         for (const auto& def : config.preprocessor_definitions) {
             cmd << " -D" << def;
         }
-        
+       
         // Add link libraries
         for (const auto& lib : config.link_libraries) {
             cmd << " -l" << lib;
         }
-        
+       
         // Add custom flags
         for (const auto& flag : config.compiler_flags) {
             cmd << " " << flag;
         }
-        
+       
         cmd << " " << source_file;
         cmd << " -o " << output_file;
         cmd << " 2>&1"; // Capture stderr
-        
+       
         return cmd.str();
     }
 
-    std::expected<std::string, interfaces::CompilerError> 
+    std::expected<std::string, interfaces::CompilerError>
     runCommand(const std::string& command, std::chrono::milliseconds timeout) {
         // For simplicity, using system() - in production, use proper process management
         std::string temp_output = temp_dir_ / ("compile_output_" + std::to_string(compilation_counter_++) + ".txt");
         std::string full_cmd = command + " > " + temp_output + " 2>&1";
-        
+       
         auto start_time = std::chrono::steady_clock::now();
         int result = std::system(full_cmd.c_str());
         auto end_time = std::chrono::steady_clock::now();
-        
+       
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         if (elapsed > timeout) {
             return std::unexpected(interfaces::CompilerError::InternalError);
         }
-        
+       
         // Read output
         std::ifstream output_file(temp_output);
         std::string output((std::istreambuf_iterator<char>(output_file)),
                           std::istreambuf_iterator<char>());
-        
+       
         // Clean up temp file
         std::filesystem::remove(temp_output);
-        
+       
         if (result != 0) {
             // Determine error type based on output
             if (output.find("error:") != std::string::npos) {
@@ -266,7 +266,7 @@ private:
             }
             return std::unexpected(interfaces::CompilerError::InternalError);
         }
-        
+       
         return output;
     }
 
@@ -283,16 +283,16 @@ public:
         std::filesystem::remove_all(temp_dir_, ec);
     }
 
-    std::expected<interfaces::CompilationResult, interfaces::CompilerError> 
+    std::expected<interfaces::CompilationResult, interfaces::CompilerError>
     compile(const std::string& source_code, const interfaces::CompilerConfig& config) override {
         try {
             auto start_time = std::chrono::steady_clock::now();
-            
+           
             // Create unique source file
             int counter = compilation_counter_++;
             auto source_file = temp_dir_ / ("source_" + std::to_string(counter) + ".cpp");
             auto output_file = temp_dir_ / ("lib_" + std::to_string(counter) + ".so");
-            
+           
             // Write source code to file
             {
                 std::ofstream file(source_file);
@@ -301,34 +301,34 @@ public:
                 }
                 file << source_code;
             }
-            
+           
             // Build and run compile command
             std::string compile_cmd = buildCompileCommand(config, source_file, output_file);
             auto compile_result = runCommand(compile_cmd, config.timeout);
-            
+           
             if (!compile_result.has_value()) {
                 return std::unexpected(compile_result.error());
             }
-            
+           
             auto end_time = std::chrono::steady_clock::now();
             auto compilation_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-            
+           
             // Check if output file was created
             if (!std::filesystem::exists(output_file)) {
                 return std::unexpected(interfaces::CompilerError::InternalError);
             }
-            
+           
             interfaces::CompilationResult result;
             result.library_path = output_file;
             result.compilation_time = compilation_time;
             result.compiler_output = *compile_result;
             result.exit_code = 0;
-            
+           
             // TODO: Extract exported symbols using nm or similar
             result.exported_symbols = {"exec"};  // Simplified for example
-            
+           
             return result;
-            
+           
         } catch (const std::exception&) {
             return std::unexpected(interfaces::CompilerError::InternalError);
         }
@@ -348,11 +348,11 @@ public:
         return *result;
     }
 
-    std::expected<bool, interfaces::CompilerError> 
+    std::expected<bool, interfaces::CompilerError>
     validateSyntax(const std::string& source_code) const override {
         // Use clang to check syntax only
         auto temp_source = temp_dir_ / ("syntax_check_" + std::to_string(compilation_counter_++) + ".cpp");
-        
+       
         {
             std::ofstream file(temp_source);
             if (!file) {
@@ -360,17 +360,17 @@ public:
             }
             file << source_code;
         }
-        
+       
         std::string check_cmd = "clang++ -fsyntax-only " + temp_source.string() + " 2>&1";
         auto result = runCommand(check_cmd, std::chrono::seconds(10));
-        
+       
         // Clean up
         std::filesystem::remove(temp_source);
-        
+       
         if (!result.has_value()) {
             return std::unexpected(result.error());
         }
-        
+       
         return result->empty() || result->find("error:") == std::string::npos;
     }
 };
@@ -388,38 +388,38 @@ public:
         try {
             // Load the compiled library
             auto library = std::make_unique<ScopedLibrary>(compilation_result.library_path);
-            
+           
             if (!library->isValid()) {
                 return std::unexpected(interfaces::ExecutionError::InvalidOperation);
             }
-            
+           
             // Look for exec function
             auto exec_fn = library->getSymbol<void()>("_Z4execv");
             if (!exec_fn.has_value()) {
                 return std::unexpected(interfaces::ExecutionError::SymbolNotFound);
             }
-            
+           
             // Execute the function with timing
             auto start_time = std::chrono::high_resolution_clock::now();
-            
+           
             try {
                 (*exec_fn.value())();
             } catch (const std::exception&) {
                 return std::unexpected(interfaces::ExecutionError::RuntimeException);
             }
-            
+           
             auto end_time = std::chrono::high_resolution_clock::now();
             auto execution_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-            
+           
             // Store the library for future symbol lookups
             current_library_ = std::move(library);
-            
+           
             interfaces::ExecutionResult result;
             result.execution_time = execution_time;
             result.success = true;
-            
+           
             return result;
-            
+           
         } catch (const std::exception&) {
             return std::unexpected(interfaces::ExecutionError::InternalError);
         }
@@ -428,12 +428,12 @@ public:
     std::expected<std::any, interfaces::ExecutionError>
     getVariable(const std::string& variable_name) override {
         std::shared_lock lock(variables_mutex_);
-        
+       
         auto it = variables_.find(variable_name);
         if (it != variables_.end()) {
             return it->second;
         }
-        
+       
         return std::unexpected(interfaces::ExecutionError::SymbolNotFound);
     }
 
@@ -448,11 +448,11 @@ public:
         std::shared_lock lock(variables_mutex_);
         std::vector<std::string> names;
         names.reserve(variables_.size());
-        
+       
         for (const auto& [name, _] : variables_) {
             names.push_back(name);
         }
-        
+       
         return names;
     }
 

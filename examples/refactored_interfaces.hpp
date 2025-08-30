@@ -17,7 +17,7 @@ struct ExecutionResult;
 // Error types for clear error handling
 enum class CompilerError {
     SyntaxError,
-    LinkageError, 
+    LinkageError,
     FileNotFound,
     PermissionDenied,
     UnsupportedFeature,
@@ -73,7 +73,7 @@ struct ExecutionResult {
 
 /**
  * @brief Interface for C++ code compilation
- * 
+ *
  * Provides clean abstraction over different compiler backends
  * with proper error handling and resource management.
  */
@@ -87,7 +87,7 @@ public:
      * @param config Compilation configuration
      * @return Compilation result or error
      */
-    virtual std::expected<CompilationResult, CompilerError> 
+    virtual std::expected<CompilationResult, CompilerError>
     compile(const std::string& source_code, const CompilerConfig& config) = 0;
 
     /**
@@ -107,13 +107,13 @@ public:
      * @param source_code Code to validate
      * @return True if syntax is valid, error otherwise
      */
-    virtual std::expected<bool, CompilerError> 
+    virtual std::expected<bool, CompilerError>
     validateSyntax(const std::string& source_code) const = 0;
 };
 
 /**
  * @brief Interface for executing compiled code
- * 
+ *
  * Handles dynamic library loading, symbol resolution,
  * and safe execution of compiled C++ code.
  */
@@ -160,7 +160,7 @@ public:
 
 /**
  * @brief Interface for managing REPL context and state
- * 
+ *
  * Thread-safe container for compilation configuration,
  * variable state, and session management.
  */
@@ -194,7 +194,7 @@ public:
 
 /**
  * @brief Interface for REPL commands
- * 
+ *
  * Plugin-style architecture for extending REPL functionality
  * with custom commands.
  */
@@ -232,7 +232,7 @@ public:
 
 /**
  * @brief Main REPL engine interface
- * 
+ *
  * Orchestrates compilation, execution, and state management
  * for interactive C++ development.
  */

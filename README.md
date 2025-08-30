@@ -130,12 +130,12 @@ The system implements a novel approach to exception backtrace capture by interce
 extern "C" void *__cxa_allocate_exception(size_t size) noexcept {
     std::array<void *, 1024> exceptionsbt{};
     int bt_size = backtrace(exceptionsbt.data(), exceptionsbt.size());
-    
+   
     // Embed backtrace directly in exception memory layout
     size_t nsize = (size + 0xFULL) & (~0xFULL);  // 16-byte alignment
     nsize += sizeof(uintptr_t) + sizeof(uintptr_t) + sizeof(size_t);
     nsize += sizeof(void *) * bt_size;
-    
+   
     void *ptr = cxa_allocate_exception_o(nsize);
     // Embed magic number and backtrace data
 }
@@ -241,9 +241,9 @@ try {
     execv();  // Execute user code
 } catch (const segvcatch::hardware_exception &e) {
     std::cerr << "Hardware exception: " << e.what() << std::endl;
-    std::cerr << assembly_info::getInstructionAndSource(getpid(), 
+    std::cerr << assembly_info::getInstructionAndSource(getpid(),
         reinterpret_cast<uintptr_t>(e.info.addr)) << std::endl;
-    
+   
     auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
     if (btrace != nullptr && size > 0) {
         backtrace_symbols_fd(btrace, size, 2);
@@ -705,7 +705,7 @@ This work builds upon concepts from:
 This implementation represents a groundbreaking approach to C++ REPL design that combines native code execution with sophisticated error handling and debugging capabilities. The system demonstrates advanced knowledge of:
 
 - Operating system signal handling and exception mechanisms
-- Assembly-level programming and register management  
+- Assembly-level programming and register management 
 - Compiler toolchain integration and AST analysis
 - Virtual memory management and symbol resolution
 - Binary format analysis and manipulation

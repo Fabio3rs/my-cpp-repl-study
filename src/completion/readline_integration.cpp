@@ -1,4 +1,5 @@
 #include "completion/readline_integration.hpp"
+#include "../../repl.hpp" // Para BuildSettings
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -14,26 +15,28 @@ std::string ReadlineIntegration::currentPrefix_;
 int ReadlineIntegration::referenceCount_ = 0;
 
 void ReadlineIntegration::initialize() {
-    std::cout << "[DEBUG] ReadlineIntegration: initialize() called\n";
-
     referenceCount_++;
-    std::cout << "[DEBUG] Reference count: " << referenceCount_ << "\n";
 
     if (!clangCompletion_) {
         clangCompletion_ = std::make_shared<ClangCompletion>();
+        clangCompletion_->initialize({});
         setupReadlineCallbacks();
-        std::cout << "[DEBUG] ReadlineIntegration: Initialized successfully\n";
-    } else {
-        std::cout << "[DEBUG] ReadlineIntegration: Already initialized\n";
+    }
+}
+
+void ReadlineIntegration::initialize(const BuildSettings &settings) {
+    referenceCount_++;
+
+    if (!clangCompletion_) {
+        clangCompletion_ = std::make_shared<ClangCompletion>();
+        clangCompletion_->initialize(settings);
+        setupReadlineCallbacks();
     }
 }
 
 void ReadlineIntegration::cleanup() {
-    std::cout << "[DEBUG] ReadlineIntegration: cleanup() called\n";
-
     if (referenceCount_ > 0) {
         referenceCount_--;
-        std::cout << "[DEBUG] Reference count: " << referenceCount_ << "\n";
     }
 
     if (referenceCount_ == 0 && clangCompletion_) {

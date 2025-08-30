@@ -5,6 +5,9 @@
 #include <readline/history.h>
 #include <readline/readline.h>
 
+// Forward declarations
+struct BuildSettings;
+
 namespace completion {
 
 /**
@@ -35,6 +38,11 @@ class ReadlineIntegration {
      * @brief Inicializa a integração readline + clang
      */
     static void initialize();
+
+    /**
+     * @brief Inicializa a integração readline + clang com configurações
+     */
+    static void initialize(const BuildSettings &settings);
 
     /**
      * @brief Finaliza e limpa recursos

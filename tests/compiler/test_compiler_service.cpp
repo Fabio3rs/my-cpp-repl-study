@@ -81,7 +81,7 @@ extern std::any lastReplResult;
 // Simplified printer output for tests
 template <class T>
 inline void printdata(const T& val, std::string_view name, std::string_view type) {
-    std::cout << " >> " << type << (name.empty() ? "" : " ") 
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
               << (name.empty() ? "" : name) << ": " << val << std::endl;
 }
 )";
@@ -187,7 +187,7 @@ TEST_F(CompilerServiceTest,
         int global_int = 42;
         std::string global_string = "test";
         double global_double = 3.14;
-        
+       
         void test_function() {
             int local_var = 10;
         }
