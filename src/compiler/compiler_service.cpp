@@ -80,7 +80,8 @@ CompilerService::executeCommand(const std::string &command) const {
 
     if (result != 0) {
         compilerResult.error = CompilerError::SystemCommandFailed;
-        std::cerr << "Command failed with code: " << result << std::endl;
+        std::cerr << std::format("Command failed with code: {}", result)
+                  << std::endl;
     }
 
     return compilerResult;
@@ -129,8 +130,10 @@ void CompilerService::printCompilationError(const std::string &logPath,
 
     if (!errorLog.empty()) {
         // Header colorido
-        std::cerr << getColorCode("red") << "=== Compilation Error in "
-                  << context << " ===" << getColorCode("reset") << std::endl;
+        std::cerr << std::format("{}=== Compilation Error in {} ==={}",
+                                 getColorCode("red"), context,
+                                 getColorCode("reset"))
+                  << std::endl;
 
         // Processar cada linha do log com cores
         std::istringstream stream(errorLog);
@@ -139,8 +142,8 @@ void CompilerService::printCompilationError(const std::string &logPath,
             std::cerr << formatErrorLine(line) << std::endl;
         }
 
-        std::cerr << getColorCode("red")
-                  << "===============================" << getColorCode("reset")
+        std::cerr << std::format("{}==============================={}",
+                                 getColorCode("red"), getColorCode("reset"))
                   << std::endl;
     }
 }
@@ -190,17 +193,21 @@ std::string CompilerService::formatErrorLine(const std::string &line) const {
 
     // Colorir diferentes tipos de mensagem
     if (line.find("error:") != std::string::npos) {
-        formatted = getColorCode("red") + getColorCode("bold") + line +
-                    getColorCode("reset");
+        formatted =
+            std::format("{}{}{}{}", getColorCode("red"), getColorCode("bold"),
+                        line, getColorCode("reset"));
     } else if (line.find("warning:") != std::string::npos) {
-        formatted = getColorCode("yellow") + getColorCode("bold") + line +
-                    getColorCode("reset");
+        formatted =
+            std::format("{}{}{}{}", getColorCode("yellow"),
+                        getColorCode("bold"), line, getColorCode("reset"));
     } else if (line.find("note:") != std::string::npos) {
-        formatted = getColorCode("blue") + line + getColorCode("reset");
+        formatted = std::format("{}{}{}", getColorCode("blue"), line,
+                                getColorCode("reset"));
     } else if (line.find("^") != std::string::npos &&
                line.find("~") != std::string::npos) {
         // Linha de indicação de erro (setas e tildes)
-        formatted = getColorCode("green") + line + getColorCode("reset");
+        formatted = std::format("{}{}{}", getColorCode("green"), line,
+                                getColorCode("reset"));
     }
 
     return formatted;
@@ -246,11 +253,11 @@ CompilerResult<std::vector<VarDecl>> CompilerService::buildLibraryWithAST(
     }
 
     // Second build - AST dump
-    cmd = compiler + " -std=" + std +
-          " -fcolor-diagnostics -fPIC -Xclang -ast-dump=json " +
-          includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-          getPreprocessorDefinitionsStr() + " -fsyntax-only " + name + ext +
-          " -o lib" + name + ".so > " + name + ".json";
+    cmd = std::format(
+        "{} -std={} -fcolor-diagnostics -fPIC -Xclang -ast-dump=json {} {} {} "
+        "-fsyntax-only {}{} -o lib{}.so > {}.json",
+        compiler, std, includePrecompiledHeader, getIncludeDirectoriesStr(),
+        getPreprocessorDefinitionsStr(), name, ext, name, name);
 
     auto astResult = executeCommand(cmd);
     if (!astResult) {
@@ -261,7 +268,8 @@ CompilerResult<std::vector<VarDecl>> CompilerService::buildLibraryWithAST(
     // Analyze AST
     analysis::ClangAstAnalyzerAdapter analyzer;
     std::vector<VarDecl> vars;
-    int ares = analyzer.analyzeFile(name + ".json", name + ".cpp", vars);
+    int ares = analyzer.analyzeFile(std::format("{}.json", name),
+                                    std::format("{}.cpp", name), vars);
     if (ares != 0) {
         result.error = CompilerError::AstAnalysisFailed;
         return result;
@@ -273,11 +281,11 @@ CompilerResult<std::vector<VarDecl>> CompilerService::buildLibraryWithAST(
     }
 
     // Third build - final library with proper settings
-    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-          getIncludeDirectoriesStr() +
-          " -std=gnu++20 -shared -include precompiledheader.hpp -g "
-          "-Wl,--export-dynamic -fPIC " +
-          name + ".cpp " + getLinkLibrariesStr() + " -o lib" + name + ".so";
+    cmd = std::format(
+        "{}{} {} -std=gnu++20 -shared -include precompiledheader.hpp -g "
+        "-Wl,--export-dynamic -fPIC {}.cpp {} -o lib{}.so",
+        compiler, getPreprocessorDefinitionsStr(), getIncludeDirectoriesStr(),
+        name, getLinkLibrariesStr(), name);
 
     auto finalBuildResult = executeCommand(cmd);
     if (!finalBuildResult) {
@@ -398,13 +406,13 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     auto astCmdFor = [&](const std::string &name, const std::string &pure) {
         // dump JSON AST + usa PCH (mesmo que seu original)
         // saída JSON vai para "<pure>.json" e logs para "<pure>.log"
-        return compiler + ppdefs + " " + includes + " -std=" + std +
-               " -fcolor-diagnostics -fPIC "
-               " -Xclang -ast-dump=json "
-               " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
-               " -include precompiledheader.hpp -fsyntax-only " +
-               name + " -o lib" + pure + "_blank.so > " + pure + ".json 2> " +
-               pure + ".log";
+        return std::format(
+            "{}{} {} -std={} -fcolor-diagnostics -fPIC "
+            "-Xclang -ast-dump=json "
+            "-Xclang -include-pch -Xclang precompiledheader.hpp.pch "
+            "-include precompiledheader.hpp -fsyntax-only {} "
+            "-o lib{}_blank.so > {}.json 2> {}.log",
+            compiler, ppdefs, includes, std, name, pure, pure, pure);
     };
 
     auto compileCmdFor = [&](const std::string &name, const std::string &obj) {
@@ -505,7 +513,7 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         if (r.errorCode != 0) {
             handleErrorAndBail(r);
         } else {
-            namesConcated += r.objectName + " ";
+            namesConcated += std::format("{} ", r.objectName);
             allVars.insert(allVars.end(), r.localVars.begin(),
                            r.localVars.end());
             hasChanged |= r.hasHeaderChanged;
@@ -532,7 +540,7 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
                 handleErrorAndBail(r);
                 break; // comportamento compatível: para no primeiro erro
             }
-            namesConcated += r.objectName + " ";
+            namesConcated += std::format("{} ", r.objectName);
             allVars.insert(allVars.end(), r.localVars.begin(),
                            r.localVars.end());
             hasChanged |= r.hasHeaderChanged;
@@ -549,12 +557,12 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     if (sources.size() == 1) {
-        std::cout << "Parallel AST+compile time (single source): " << ms
-                  << "ms\n";
+        std::cout << std::format(
+            "Parallel AST+compile time (single source): {}ms\n", ms);
     } else {
-        std::cout << "Parallel AST+compile time (" << sources.size()
-                  << " sources, max " << getEffectiveThreadCount()
-                  << " threads): " << ms << "ms\n";
+        std::cout << std::format(
+            "Parallel AST+compile time ({} sources, max {} threads): {}ms\n",
+            sources.size(), getEffectiveThreadCount(), ms);
     }
 
     // Link (sequencial)
