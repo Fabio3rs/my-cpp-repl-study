@@ -232,7 +232,7 @@ private:
     std::string outputHeader_;
     std::unordered_set<std::string> includedFiles_;
     mutable std::mutex contextWriteMutex;  // Thread safety
-  
+
 public:
     void addInclude(const std::string &includePath) {
         std::scoped_lock<std::mutex> lock(contextWriteMutex);  // RAII locking
@@ -271,7 +271,7 @@ public:
         entries_.push_back({std::move(prefix), std::move(description),
                            std::move(handler)});
     }
-  
+
     bool tryHandle(std::string_view line, CommandContextBase &ctx) const {
         for (const auto &entry : entries_) {
             if (line.rfind(entry.prefix, 0) == 0) {
@@ -557,12 +557,12 @@ class ScopedLibrary {
 public:
     explicit ScopedLibrary(const std::filesystem::path& path);
     ~ScopedLibrary();
-  
+
     ScopedLibrary(const ScopedLibrary&) = delete;
     ScopedLibrary& operator=(const ScopedLibrary&) = delete;
     ScopedLibrary(ScopedLibrary&& other) noexcept;
     ScopedLibrary& operator=(ScopedLibrary&& other) noexcept;
-  
+
     template<typename T>
     std::expected<T*, LibraryError> getSymbol(const std::string& name);
 };
@@ -584,7 +584,7 @@ public:
     // All methods thread-safe
     std::expected<ExecutionResult, ReplError>
     evaluateCode(const std::string& code);
-  
+
     // Multiple REPL instances supported
     static std::unique_ptr<ThreadSafeRepl> create(const ReplConfig& config);
 };
@@ -632,7 +632,7 @@ TEST(CompilerTests, SuccessfulCompilation) {
     auto config = CompilerConfig{};
     MockCompiler compiler;
     auto result = compiler.compile(config);
-  
+
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->exit_code, 0);
 }
@@ -646,9 +646,9 @@ Test component interactions:
 TEST(ReplIntegrationTests, EndToEndExecution) {
     auto repl = ThreadSafeRepl::create(ReplConfig{});
     auto result = repl->evaluateCode("int x = 42;");
-  
+
     ASSERT_TRUE(result.has_value());
-  
+
     auto x_value = repl->getVariable("x");
     ASSERT_TRUE(x_value.has_value());
     EXPECT_EQ(std::any_cast<int>(*x_value), 42);
@@ -762,7 +762,7 @@ private:
     std::unique_ptr<ICompiler> compiler_;
     std::unique_ptr<IExecutor> executor_;
     std::unique_ptr<ReplContext> context_;
-  
+
 public:
     std::expected<ExecutionResult, ReplError>
     evaluateStatement(const std::string& statement);

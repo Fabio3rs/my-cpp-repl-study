@@ -69,7 +69,7 @@ namespace compiler {
     struct CompilerResult {
         T value{};
         CompilerError error = CompilerError::Success;
-      
+
         bool success() const { return error == CompilerError::Success; }
         explicit operator bool() const { return success(); }
     };
@@ -107,7 +107,7 @@ namespace execution {
             void *fnptr;          // Target function pointer
             void **wrap_ptrfn;    // Trampoline wrapper
         };
-      
+
         // Naked function trampolines for zero-overhead symbol resolution
         std::string generateFunctionWrapper(const VarDecl &fnvars);
         void updateWrapperFunction(const std::string &name, void *fnptr);
@@ -151,12 +151,12 @@ namespace analysis {
         mutable std::shared_mutex contextMutex;
         std::string outputHeader;
         std::unordered_set<std::filesystem::path> includedFiles;
-      
+
     public:
         void addInclude(const std::string& includePath);
         void addDeclaration(const std::string& declaration);
         void addLineDirective(int64_t line, const std::filesystem::path& file);
-      
+
         // Thread-safe accessors with std::format integration
         std::string getOutputHeader() const;
         bool hasInclude(const std::filesystem::path& include) const;
@@ -185,15 +185,15 @@ namespace execution {
         std::string lastLibrary;
         std::unordered_map<std::string, uintptr_t> symbolsToResolve;
         std::unordered_map<std::string, wrapperFn> fnNames;
-      
+
         int64_t replCounter = 0;
         mutable std::shared_mutex stateMutex;
-      
+
         // Thread-safe accessors
         void setLastLibrary(const std::string& library);
         std::string getLastLibrary() const;
     };
-  
+
     GlobalExecutionState& getGlobalExecutionState();
 }
 ```
@@ -217,7 +217,7 @@ namespace commands {
     template<typename... Args>
     class CommandRegistry {
         std::unordered_map<std::string, std::function<bool(Args...)>> commands;
-      
+
     public:
         void registerCommand(const std::string& name,
                            std::function<bool(Args...)> handler);
@@ -293,7 +293,7 @@ protected:
         TempDirectoryFixture::SetUp();
         mockSettings = std::make_unique<MockBuildSettings>(getTempDir());
     }
-  
+
     std::unique_ptr<MockBuildSettings> mockSettings;
 };
 
@@ -331,12 +331,12 @@ int main(int argc, char **argv) {
 case 'r': {
     std::string_view replCmdsFile(optarg);
     std::fstream file(replCmdsFile.data(), std::ios::in);
-  
+
     if (!file.is_open()) {
         std::cerr << "Cannot open file: " << replCmdsFile << '\n';
         return 1;
     }
-  
+
     std::string line;
     try {
         while (std::getline(file, line)) {
@@ -482,7 +482,7 @@ template <typename T>
 struct CompilerResult {
     T value{};
     CompilerError error = CompilerError::Success;
-  
+
     bool success() const { return error == CompilerError::Success; }
     explicit operator bool() const { return success(); }
 };
@@ -533,13 +533,13 @@ class AstContext {
     mutable std::shared_mutex contextMutex;
     std::string outputHeader;
     std::unordered_set<std::filesystem::path> includedFiles;
-  
+
 public:
     void addDeclaration(const std::string& declaration) {
         std::scoped_lock lock(contextMutex);
         outputHeader += declaration + "\n";
     }
-  
+
     std::string getOutputHeader() const {
         std::shared_lock lock(contextMutex);
         return outputHeader;
@@ -585,7 +585,7 @@ namespace execution {
         // Symbol resolution requires process-wide state
         std::unordered_map<std::string, uintptr_t> symbolsToResolve;
         std::unordered_map<std::string, wrapperFn> fnNames;
-      
+
         // Thread-safe access despite global nature
         mutable std::shared_mutex stateMutex;
     };
@@ -665,7 +665,7 @@ TEST_F(AstContextTest, ConcurrentAccess) {
     analysis::AstContext context;
     std::vector<std::thread> threads;
     std::atomic<int> successCount{0};
-  
+
     // Test concurrent read/write operations
     for (int i = 0; i < 10; ++i) {
         threads.emplace_back([&context, &successCount, i]() {
@@ -673,11 +673,11 @@ TEST_F(AstContextTest, ConcurrentAccess) {
             successCount++;
         });
     }
-  
+
     for (auto& thread : threads) {
         thread.join();
     }
-  
+
     EXPECT_EQ(successCount.load(), 10);
     // Verify all declarations were added safely
 }

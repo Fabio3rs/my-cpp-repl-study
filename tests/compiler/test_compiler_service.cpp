@@ -187,7 +187,7 @@ TEST_F(CompilerServiceTest,
         int global_int = 42;
         std::string global_string = "test";
         double global_double = 3.14;
-      
+
         void test_function() {
             int local_var = 10;
         }

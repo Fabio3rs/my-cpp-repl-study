@@ -164,10 +164,10 @@ namespace completion {
     class ClangCompletion {
         // Phase 1: Basic integration
         std::vector<CompletionItem> getCompletions(code, line, col);
-      
+
         // Phase 2: Context awareness
         void updateReplContext(const ReplState& repl);
-      
+
         // Phase 3: Advanced features
         std::string getDocumentation(const std::string& symbol);
         std::vector<Diagnostic> getDiagnostics(const std::string& code);
@@ -190,7 +190,7 @@ for (auto& source : sources) {
         auto compileFuture = std::async(std::launch::async, [compileCmd]() {
             return runProgramGetOutput(compileCmd);  // Object compilation
         });
-       
+
         auto astResult = astFuture.get();
         auto compileResult = compileFuture.get();
         return mergeResults(astResult, compileResult);
@@ -211,10 +211,10 @@ namespace execution {
     class SymbolCache {
         // Persistent storage
         std::unordered_map<std::string, CachedSymbol> cache_;
-      
+
         // Memory-mapped backing store
         std::unique_ptr<MemoryMappedFile> storage_;
-      
+
         // Thread-safe access
         mutable std::shared_mutex cacheMutex_;
     };
@@ -245,7 +245,7 @@ docs/
 ### **Performance Targets**
 - ✅ **Compilation Speed**: **63ms average** (target: < 100ms) - **47% better than target**
 - ✅ **Parallel Efficiency**: **Linear scaling** with CPU cores for multiple files
-- 🎯 **Completion Latency**: < 100ms para 95% dos casos 
+- 🎯 **Completion Latency**: < 100ms para 95% dos casos
 - 🎯 **Memory Usage**: < 50MB baseline, < 200MB com cache completo
 - 🎯 **Startup Time**: < 2 segundos para cold start
 - 🎯 **Symbol Resolution**: < 10ms para símbolos cached
