@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Forward declarations
@@ -88,6 +89,10 @@ class CompilerService {
     const BuildSettings *buildSettings_;
     std::shared_ptr<analysis::AstContext> astContext_;
     VarMergeCallback varMergeCallback_;
+
+    // Configuration for parallel processing
+    mutable size_t maxThreads_ =
+        0; // 0 = auto-detect based on hardware_concurrency
 
   public:
     /**
@@ -209,6 +214,27 @@ class CompilerService {
      */
     void setAstContext(std::shared_ptr<analysis::AstContext> context) {
         astContext_ = context;
+    }
+
+    // === Threading Configuration ===
+
+    /**
+     * @brief Set maximum number of threads for parallel operations
+     * @param maxThreads Maximum threads (0 = auto-detect from
+     * hardware_concurrency)
+     */
+    void setMaxThreads(size_t maxThreads) const { maxThreads_ = maxThreads; }
+
+    /**
+     * @brief Get effective number of threads for parallel operations
+     * @return Number of threads that will be used
+     */
+    size_t getEffectiveThreadCount() const {
+        if (maxThreads_ == 0) {
+            auto hwThreads = std::thread::hardware_concurrency();
+            return hwThreads > 0 ? hwThreads : 4; // fallback to 4 threads
+        }
+        return maxThreads_;
     }
 
   private:

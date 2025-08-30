@@ -13,6 +13,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -20,8 +21,8 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto runProgramGetOutput(std::string_view cmd)
-    -> std::pair<std::string, int>;
+extern auto
+runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
 extern int verbosityLevel;
 
 namespace compiler {
@@ -360,96 +361,181 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     const std::vector<std::string> &sources, const std::string &std) const {
     CompilerResult<CompilationResult> result;
 
-    std::string includes = getIncludeDirectoriesStr();
-    std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
+    // Early return
+    if (sources.empty()) {
+        result.value.returnCode = 0;
+        return result;
+    }
 
-    auto now = std::chrono::system_clock::now();
+    const std::string includes = getIncludeDirectoriesStr();
+    const std::string ppdefs = getPreprocessorDefinitionsStr();
+    const auto t0 = std::chrono::system_clock::now();
 
-    std::string namesConcated;
     std::vector<VarDecl> allVars;
+    std::string namesConcated;
+    bool hasChanged = false;
     int errorCode = 0;
 
-    bool hasChanged = false;
-
-    // Process each source file sequentially (simplified from parallel version)
-    for (const auto &name : sources) {
-        if (name.empty()) {
-            continue;
-        }
-
-        const auto path = std::filesystem::path(name);
-        std::string purefilename = path.filename().string();
-        purefilename = purefilename.substr(0, purefilename.find_last_of('.'));
-
-        // AST Analysis - generate JSON file
-        std::string logname = std::format("{}.log", purefilename);
-        std::string jsonFile = std::format("{}.json", purefilename);
-        std::string cmd =
-            compiler + preprocessorDefinitions + " " + includes +
-            " -std=" + std +
-            " -fcolor-diagnostics -fPIC -Xclang -ast-dump=json "
-            " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
-            "-include precompiledheader.hpp -fsyntax-only " +
-            name + " -o lib" + purefilename + "_blank.so > " + jsonFile +
-            " 2>" + logname;
-
-        auto out = runProgramGetOutput(cmd);
-
-        if (out.second != 0) {
-            std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second << " "
-                      << cmd << std::endl;
-
-            // Print compilation error log
-            printCompilationError(logname, "AST dump for " + name);
-
-            errorCode = out.second;
-            break;
-        }
-        analysis::ClangAstAnalyzerAdapter analyzer;
+    struct SourceProcessResult {
+        std::string sourceFile;
+        std::string purefilename;
+        std::string objectName;
         std::vector<VarDecl> localVars;
+        bool hasHeaderChanged = false;
+        int errorCode = 0;
+        std::string errorMessage;
+    };
 
-        // Analisar o AST usando o saída do comando anterior (JSON do AST)
-        int ares = analyzer.analyzeFile(jsonFile, name, localVars);
-        if (ares != 0) {
-            std::cerr << "AST analysis failed for " << name
-                      << " with code: " << ares << std::endl;
-            errorCode = ares;
-            break;
+    // Helpers ---------------------------------------------------------------
+
+    auto pureName = [](const std::string &pathStr) {
+        const auto path = std::filesystem::path(pathStr);
+        auto base = path.filename().string();
+        const auto pos = base.find_last_of('.');
+        return pos == std::string::npos ? base : base.substr(0, pos);
+    };
+
+    auto astCmdFor = [&](const std::string &name, const std::string &pure) {
+        // dump JSON AST + usa PCH (mesmo que seu original)
+        // saída JSON vai para "<pure>.json" e logs para "<pure>.log"
+        return compiler + ppdefs + " " + includes + " -std=" + std +
+               " -fcolor-diagnostics -fPIC "
+               " -Xclang -ast-dump=json "
+               " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
+               " -include precompiledheader.hpp -fsyntax-only " +
+               name + " -o lib" + pure + "_blank.so > " + pure + ".json 2> " +
+               pure + ".log";
+    };
+
+    auto compileCmdFor = [&](const std::string &name, const std::string &obj) {
+        return std::format("{}{} {} -std=gnu++20 -fPIC -c -Xclang "
+                           "-include-pch -Xclang precompiledheader.hpp.pch "
+                           "-include precompiledheader.hpp "
+                           "-g -fPIC {} -o {}",
+                           compiler, ppdefs, includes, name, obj);
+    };
+
+    auto analyzeAst =
+        [&](const std::string &jsonFile, const std::string &srcName,
+            std::vector<VarDecl> &outVars, bool &outHeaderChanged) -> int {
+        analysis::ClangAstAnalyzerAdapter analyzer;
+        int ares = analyzer.analyzeFile(jsonFile, srcName, outVars);
+        if (ares == 0) {
+            outHeaderChanged = analyzer.getContext()->hasHeaderChanged();
+        }
+        return ares;
+    };
+
+    auto processOne = [&](const std::string &name) -> SourceProcessResult {
+        SourceProcessResult r;
+        r.sourceFile = name;
+        if (name.empty()) {
+            return r;
         }
 
-        hasChanged |= analyzer.getContext()->hasHeaderChanged();
+        r.purefilename = pureName(name);
+        r.objectName = std::format("{}.o", r.purefilename);
 
-        allVars.insert(allVars.end(), localVars.begin(), localVars.end());
+        const std::string astCmd = astCmdFor(name, r.purefilename);
+        const std::string ccCmd = compileCmdFor(name, r.objectName);
 
-        // Compile to object
         try {
-            std::string object = std::format("{}.o", purefilename);
-            namesConcated += std::format("{} ", object);
+            // AST + compile em paralelo
+            auto futAst = std::async(std::launch::async, [&, astCmd] {
+                return runProgramGetOutput(astCmd);
+            });
+            auto futCC = std::async(std::launch::async, [&, ccCmd] {
+                return runProgramGetOutput(ccCmd);
+            });
 
-            cmd = std::format("{}{} {} -std=gnu++20 -fPIC -c -Xclang "
-                              "-include-pch -Xclang precompiledheader.hpp.pch "
-                              "-include precompiledheader.hpp "
-                              "-g -fPIC {} -o {}",
-                              compiler, preprocessorDefinitions, includes, name,
-                              object);
+            const auto astRes = futAst.get();
+            const auto ccRes = futCC.get();
 
-            int buildres = system(cmd.c_str());
-
-            if (buildres != 0) {
-                errorCode = buildres;
-                std::cerr << "buildres != 0: " << cmd << std::endl;
-                std::cout << name << std::endl;
-
-                // Print compilation error log
-                printCompilationError(logname,
-                                      "object compilation for " + name);
-
-                break;
+            if (astRes.second != 0) {
+                r.errorCode = astRes.second;
+                r.errorMessage =
+                    std::format("AST dump failed for {}: {}", name, astCmd);
+                return r;
             }
+            if (ccRes.second != 0) {
+                r.errorCode = ccRes.second;
+                r.errorMessage = std::format(
+                    "Object compilation failed for {}: {}", name, ccCmd);
+                return r;
+            }
+
+            // Análise do JSON
+            bool headerChanged = false;
+            const int ares = analyzeAst(r.purefilename + ".json", name,
+                                        r.localVars, headerChanged);
+            if (ares != 0) {
+                r.errorCode = ares;
+                r.errorMessage = std::format(
+                    "AST analysis failed for {} with code: {}", name, ares);
+                return r;
+            }
+
+            r.hasHeaderChanged = headerChanged;
+            r.errorCode = 0;
+            return r;
+
         } catch (const std::exception &e) {
-            std::cerr << e.what() << std::endl;
-            errorCode = -1;
-            break;
+            r.errorCode = -1;
+            r.errorMessage = std::format("Exception during processing {}: {}",
+                                         name, e.what());
+            return r;
+        }
+    };
+
+    auto handleErrorAndBail = [&](const SourceProcessResult &r) {
+        if (r.errorCode != 0) {
+            std::cerr << r.errorMessage << std::endl;
+            if (r.errorCode > 0) {
+                printCompilationError(std::format("{}.log", r.purefilename),
+                                      "processing for " + r.sourceFile);
+            }
+            errorCode = r.errorCode;
+        }
+    };
+
+    // Execução --------------------------------------------------------------
+
+    if (sources.size() == 1) {
+        auto r = processOne(sources.front());
+        if (r.errorCode != 0) {
+            handleErrorAndBail(r);
+        } else {
+            namesConcated += r.objectName + " ";
+            allVars.insert(allVars.end(), r.localVars.begin(),
+                           r.localVars.end());
+            hasChanged |= r.hasHeaderChanged;
+        }
+    } else {
+        const size_t maxConc =
+            std::min(getEffectiveThreadCount(), sources.size());
+        std::vector<std::future<SourceProcessResult>> futures;
+        futures.reserve(sources.size());
+
+        // Lança com capping simples (como seu original)
+        for (size_t i = 0; i < sources.size(); ++i) {
+            const auto &name = sources[i];
+            if (name.empty())
+                continue;
+            auto policy =
+                (i < maxConc) ? std::launch::async : std::launch::deferred;
+            futures.emplace_back(std::async(policy, processOne, name));
+        }
+
+        for (auto &f : futures) {
+            auto r = f.get();
+            if (r.errorCode != 0) {
+                handleErrorAndBail(r);
+                break; // comportamento compatível: para no primeiro erro
+            }
+            namesConcated += r.objectName + " ";
+            allVars.insert(allVars.end(), r.localVars.begin(),
+                           r.localVars.end());
+            hasChanged |= r.hasHeaderChanged;
         }
     }
 
@@ -459,38 +545,38 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         return result;
     }
 
-    auto end = std::chrono::system_clock::now();
-    std::cout << "Analyze and compile time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       now)
-                     .count()
-              << "ms\n";
+    const auto t1 = std::chrono::system_clock::now();
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    if (sources.size() == 1) {
+        std::cout << "Parallel AST+compile time (single source): " << ms
+                  << "ms\n";
+    } else {
+        std::cout << "Parallel AST+compile time (" << sources.size()
+                  << " sources, max " << getEffectiveThreadCount()
+                  << " threads): " << ms << "ms\n";
+    }
 
-    // Link all objects
-    std::string cmd =
+    // Link (sequencial)
+    const std::string linkCmd =
         std::format("{} -shared -g -WL,--export-dynamic {} {} -o lib{}.so",
                     compiler, namesConcated, getLinkLibrariesStr(), libname);
 
-    auto linkResult = executeCommand(cmd);
-    if (!linkResult) {
+    if (auto linkRes = executeCommand(linkCmd); !linkRes) {
         result.error = CompilerError::LinkingFailed;
-        result.value.returnCode = linkResult.value;
+        result.value.returnCode = linkRes.value;
         return result;
     }
 
-    // Merge variables using callback if provided
     if (varMergeCallback_) {
         varMergeCallback_(allVars);
     }
-
-    // Salva o header se houve mudanças
     if (hasChanged) {
         analysis::AstContext::staticSaveHeaderToFile("decl_amalgama.hpp");
     }
 
     result.value.variables = std::move(allVars);
     result.value.returnCode = 0;
-
     return result;
 }
 

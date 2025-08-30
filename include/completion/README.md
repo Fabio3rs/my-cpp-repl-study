@@ -53,7 +53,7 @@ struct ReplContext {
 ### 🚧 **Para Implementação Real**
 - [ ] Integração real com libclang
 - [ ] Parsing de translation units
-- [ ] Cache de completions para performance 
+- [ ] Cache de completions para performance
 - [ ] Integração com estado real do REPL
 - [ ] Error recovery e diagnostics
 
@@ -121,7 +121,7 @@ std::vector<
 ### **Conexões com REPL Existente**
 
 1. **Estado de Variáveis**: `replState.varsNames` → `ReplContext.variableDeclarations`
-2. **Includes Atuais**: Headers carregados → `ReplContext.currentIncludes` 
+2. **Includes Atuais**: Headers carregados → `ReplContext.currentIncludes`
 3. **Funções Definidas**: Funções do REPL → `ReplContext.functionDeclarations`
 4. **AST Context**: `AstContext` → Definições de tipos
 
@@ -175,6 +175,6 @@ Autocompletion genérico é limitado. Contexto semântico transforma a experiên
 
 ---
 
-**Status**: 🏗️ **Esqueleto Completo** - Pronto para implementação real com libclang 
-**Priority**: 🚀 **Alta** - Transforma UX do REPL dramaticamente 
+**Status**: 🏗️ **Esqueleto Completo** - Pronto para implementação real com libclang
+**Priority**: 🚀 **Alta** - Transforma UX do REPL dramaticamente
 **Effort**: ⏱️ **8-12 horas** - Weekend sprint implementable

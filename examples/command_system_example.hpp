@@ -62,11 +62,11 @@ public:
         }
 
         const std::string& header = args[0];
-       
+      
         // Determine if it's a system header or user header
         bool is_system_header = (header.front() == '<' && header.back() == '>') ||
                                (header.front() != '"' && header.back() != '"');
-       
+      
         // Add to preprocessor definitions as include directive
         if (is_system_header) {
             context.addPreprocessorDefinition("INCLUDE_SYSTEM_" + header);
@@ -78,7 +78,7 @@ public:
                 context.addIncludeDirectory(header_dir);
             }
         }
-       
+      
         return {};
     }
 };
@@ -214,32 +214,32 @@ public:
         }
 
         auto config = context.getCompilerConfig();
-       
+      
         std::cout << "REPL Status:\n";
         std::cout << "  Session ID: " << context.getSessionId() << "\n";
         std::cout << "  Compiler: " << config.compiler_path << "\n";
         std::cout << "  C++ Standard: " << config.std_version << "\n";
         std::cout << "  Debug Info: " << (config.enable_debug_info ? "enabled" : "disabled") << "\n";
         std::cout << "  Optimization: " << (config.enable_optimization ? "enabled" : "disabled") << "\n";
-       
+      
         auto includes = context.getIncludeDirectories();
         std::cout << "  Include Directories (" << includes.size() << "):\n";
         for (const auto& dir : includes) {
             std::cout << "    " << dir << "\n";
         }
-       
+      
         auto libraries = context.getLinkLibraries();
         std::cout << "  Link Libraries (" << libraries.size() << "):\n";
         for (const auto& lib : libraries) {
             std::cout << "    " << lib << "\n";
         }
-       
+      
         auto definitions = context.getPreprocessorDefinitions();
         std::cout << "  Preprocessor Definitions (" << definitions.size() << "):\n";
         for (const auto& def : definitions) {
             std::cout << "    " << def << "\n";
         }
-       
+      
         return {};
     }
 };
@@ -288,11 +288,11 @@ public:
         registerCommand(std::make_unique<ResetCommand>());
         registerCommand(std::make_unique<StatusCommand>());
         registerCommand(std::make_unique<QuitCommand>(should_exit_));
-       
+      
         // Create help command with reference to commands map
         help_command_ = std::make_unique<HelpCommand>(commands_);
         commands_["help"] = std::unique_ptr<ICommand>(help_command_.get());
-       
+      
         // Add aliases
         commands_["exit"] = std::unique_ptr<ICommand>(commands_["quit"].get());
         commands_["q"] = std::unique_ptr<ICommand>(commands_["quit"].get());
@@ -338,11 +338,11 @@ public:
     std::vector<std::string> getAvailableCommands() const {
         std::vector<std::string> names;
         names.reserve(commands_.size());
-       
+      
         for (const auto& [name, _] : commands_) {
             names.push_back(name);
         }
-       
+      
         return names;
     }
 };

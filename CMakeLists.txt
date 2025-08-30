@@ -129,18 +129,18 @@ set(CPPREPL_LIB_SOURCES
     repl.cpp
     ast_context.cpp
     clang_ast_adapter.cpp
-   
+  
     # Modular source components
     src/compiler/compiler_service.cpp
     src/execution/execution_engine.cpp
     src/execution/symbol_resolver.cpp
-   
+  
     # Utility components
     utility/backtraced_exceptions.cpp
     utility/library_introspection.cpp
     utility/quote.cpp
     printerOverloads.cpp
-   
+  
     # External dependencies
     simdjson.cpp
     simdjson.h
@@ -211,7 +211,7 @@ endif()
 
 if(ENABLE_ICONS)
     message(STATUS "✓ Icon support enabled")
-   
+  
     # Define icon paths
     set(CPPREPL_ICON_DIR "${CMAKE_SOURCE_DIR}/assets/icons")
     set(CPPREPL_ICON_PNG_DIR "${CMAKE_SOURCE_DIR}/assets/icons/png")
@@ -243,7 +243,7 @@ if(ENABLE_ICONS)
 
     # Define icon path for the application
     target_compile_definitions(cpprepl_lib PUBLIC CPPREPL_ICON_PATH="${CPPREPL_ICON_DIR}")
-   
+  
 else()
     message(STATUS "✗ Icon support disabled")
 endif()
@@ -291,7 +291,7 @@ endif()
 # LibClang completion demos (requires libclang)
 if(Clang_FOUND)
     message(STATUS "✓ Building Clang completion demos")
-   
+  
     # Basic completion demo
     add_executable(completion_demo
         examples/completion_demo.cpp
