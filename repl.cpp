@@ -415,10 +415,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -1111,6 +1112,38 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         cfg.analyze = false;
     }
 
+    // std::cout << line << std::endl;
+
+    // Se chegou até aqui e não foi processado por comando especial,
+    // aplica detecção inteligente para código normal
+    if (cfg.fileWrap && !line.starts_with("#eval") &&
+        !line.starts_with("#lazyeval") && !line.starts_with("#return") &&
+        !line.starts_with("#batch_eval")) {
+
+        if (isDefinitionCode(line)) {
+            // É uma definição - mantém no escopo global
+            if (verbosityLevel >= 2) {
+                std::cout << "🔧 Global definition detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "🔧 Definition: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
+            }
+            cfg.analyze = true; // Analisar AST para definições
+        } else {
+            // É código executável - envolver em exec()
+            if (verbosityLevel >= 2) {
+                std::cout << "⚡ Executable code detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "⚡ Code: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
+            }
+            line = std::format("void exec() {{ {}; }}\n", line);
+            cfg.analyze = false;
+        }
+    }
+
     if (auto rerun = replState.evalResults.find(line);
         rerun != replState.evalResults.end()) {
         try {
@@ -1154,38 +1187,6 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         }
 
         return true;
-    }
-
-    // std::cout << line << std::endl;
-
-    // Se chegou até aqui e não foi processado por comando especial,
-    // aplica detecção inteligente para código normal
-    if (cfg.fileWrap && !line.starts_with("#eval") &&
-        !line.starts_with("#lazyeval") && !line.starts_with("#return") &&
-        !line.starts_with("#batch_eval")) {
-
-        if (isDefinitionCode(line)) {
-            // É uma definição - mantém no escopo global
-            if (verbosityLevel >= 2) {
-                std::cout << "🔧 Global definition detected\n";
-            } else if (verbosityLevel >= 1) {
-                std::cout << std::format(
-                    "🔧 Definition: {}\n",
-                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
-            }
-            cfg.analyze = true; // Analisar AST para definições
-        } else {
-            // É código executável - envolver em exec()
-            if (verbosityLevel >= 2) {
-                std::cout << "⚡ Executable code detected\n";
-            } else if (verbosityLevel >= 1) {
-                std::cout << std::format(
-                    "⚡ Code: {}\n",
-                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
-            }
-            line = std::format("void exec() {{ {}; }}\n", line);
-            cfg.analyze = false;
-        }
     }
 
     cfg.repl_name = std::format("repl_{}", i++);
