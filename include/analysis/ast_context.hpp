@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../simdjson.h"
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -11,6 +12,27 @@
 struct VarDecl;
 
 namespace analysis {
+
+/**
+ * @brief Estrutura para rastreamento de código fonte
+ * Esta estrutura mantém informações sobre trechos de código fonte,
+ * incluindo o snippet de código, o nome do arquivo, a linha e coluna
+ * onde o código começa, e um contador de REPL para identificar
+ * a ordem de inserção.
+ */
+struct CodeTracking {
+    std::string codeSnippet;
+    std::string filename;
+    int64_t line{};
+    int64_t column{};
+
+    int64_t replCounter{};
+
+    CodeTracking() = default;
+    CodeTracking(std::string file, int64_t ln = {}, int64_t col = {},
+                 int64_t repl = {})
+        : filename(std::move(file)), line(ln), column(col), replCounter(repl) {}
+};
 
 /**
  * @brief Contexto para análise AST que encapsula o estado compartilhado
@@ -96,10 +118,35 @@ class AstContext {
      * pois é usada para gerar decl_amalgama.hpp com todas as declarações
      * acumuladas ao longo da sessão. Limpar esta variável quebra a
      * funcionalidade básica do REPL.
+     * NEW: para cada adição nova no outputHeader_, deve haver um equivalente em
+     * codeSnippets_
      */
     static std::string outputHeader_;
     static std::unordered_set<std::string> includedFiles_;
+    static std::vector<CodeTracking> codeSnippets_;
     mutable size_t lastHeaderSize_ = 0;
+
+  public:
+    /**
+     * @brief Retorna referência constante para todos os registros de tracking
+     * @return const std::vector<CodeTracking>&
+     */
+    const std::vector<CodeTracking> &getCodeSnippets() const {
+        return codeSnippets_;
+    }
+
+    /**
+     * @brief Retorna referência mutável para edição interna dos registros
+     * @return std::vector<CodeTracking>&
+     */
+    std::vector<CodeTracking> &getCodeSnippetsMutable() {
+        return codeSnippets_;
+    }
+
+    /**
+     * @brief Limpa todos os registros de tracking
+     */
+    void clearCodeSnippets();
 };
 
 /**

@@ -11,6 +11,10 @@
 #include <mutex>
 #include <readline/chardefs.h>
 #include <system_error>
+#include <vector>
+
+// Forward declaration do replCounter global definido em repl.cpp
+extern int64_t replCounter;
 
 namespace analysis {
 
@@ -23,12 +27,27 @@ static std::mutex contextWriteMutex;
  */
 std::string AstContext::outputHeader_;
 std::unordered_set<std::string> AstContext::includedFiles_;
+std::vector<CodeTracking> AstContext::codeSnippets_;
 
 bool AstContext::addInclude(const std::string &includePath) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
         includedFiles_.insert(includePath);
-        outputHeader_ += std::format("#include \"{}\"\n", includePath);
+
+        // Adicionando tracking para o outputHeader_
+        std::string includeDeclaration =
+            std::format("#include \"{}\"\n", includePath);
+        outputHeader_ += includeDeclaration;
+
+        // Criar CodeTracking correspondente
+        CodeTracking tracking;
+        tracking.codeSnippet = includeDeclaration;
+        tracking.filename = includePath;
+        tracking.line = -1; // Include não tem linha específica
+        tracking.column = -1;
+        tracking.replCounter = replCounter;
+        codeSnippets_.emplace_back(std::move(tracking));
+
         return true;
     }
 
@@ -37,13 +56,38 @@ bool AstContext::addInclude(const std::string &includePath) {
 
 void AstContext::addDeclaration(const std::string &declaration) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    outputHeader_ += std::format("{}\n", declaration);
+
+    // Adicionando tracking para o outputHeader_
+    std::string formattedDeclaration = std::format("{}\n", declaration);
+    outputHeader_ += formattedDeclaration;
+
+    // Criar CodeTracking correspondente
+    CodeTracking tracking;
+    tracking.codeSnippet = formattedDeclaration;
+    tracking.filename = ""; // Declaração não tem arquivo específico (gerada)
+    tracking.line = -1;
+    tracking.column = -1;
+    tracking.replCounter = replCounter;
+    codeSnippets_.emplace_back(std::move(tracking));
 }
 
 void AstContext::addLineDirective(int64_t line,
                                   const std::filesystem::path &file) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    outputHeader_ += std::format("#line {} \"{}\"\n", line, file.string());
+
+    // Adicionando tracking para o outputHeader_
+    std::string lineDirective =
+        std::format("#line {} \"{}\"\n", line, file.string());
+    outputHeader_ += lineDirective;
+
+    // Criar CodeTracking correspondente
+    CodeTracking tracking;
+    tracking.codeSnippet = lineDirective;
+    tracking.filename = file.string();
+    tracking.line = line;
+    tracking.column = -1; // Line directive não tem coluna específica
+    tracking.replCounter = replCounter;
+    codeSnippets_.emplace_back(std::move(tracking));
 }
 
 bool AstContext::isFileIncluded(const std::string &filePath) const {
