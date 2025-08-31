@@ -60,7 +60,7 @@
 #### **4. Performance Optimization** ⏱️ 10-12 horas
 - [x] **Compilation Pipeline Parallelization**: ✅ **COMPLETED**
   - **Real-time AST + Object Compilation**: Parallel execution using std::async
-  - **22% Performance Improvement**: Parallel execution over sequential processing
+  - **Optimized Architecture**: Parallel compilation pipeline design
   - **Scalable Multi-core Utilization**: Linear scaling with available CPU cores
   - **Multi-level Parallelism**: Both inter-file and intra-file parallel processing
   - **Zero Breaking Changes**: Full backward compatibility maintained
@@ -199,7 +199,7 @@ for (auto& source : sources) {
 ```
 
 **Performance Results:**
-- **Parallel Processing**: 22% improvement over sequential processing
+- **Parallel Processing**: Optimized compilation pipeline architecture
 - **Multiple Files**: Linear scaling with CPU cores
 - **CPU Utilization**: 2 cores per file (AST + Object compilation)
 - **Thread Configuration**: Auto-detects `hardware_concurrency()`, fallback to 4 threads

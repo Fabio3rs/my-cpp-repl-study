@@ -879,7 +879,7 @@ CompilerResult<int> buildLibrary(const std::string& compiler,
 auto result = compilerService.buildMultipleSourcesWithAST(
     compiler, libname, sources, std);
     
-// Measured improvement: 22% faster (120ms → 93ms)
+// Measured performance: 93ms average compilation
 ```
 
 ### Caching Strategies

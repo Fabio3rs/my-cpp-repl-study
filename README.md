@@ -10,7 +10,7 @@
 
 **Research Project**: Interactive C++ development through dynamic compilation and advanced error handling
 
-**Key Features**: Dynamic compilation • Signal-to-exception translation • **Parallel compilation (22% faster)** • **LSP semantic completion** • Real-time function replacement • Assembly-level debugging • AST analysis
+**Key Features**: Dynamic compilation • Signal-to-exception translation • **Parallel compilation pipeline** • **LSP semantic completion** • Real-time function replacement • Assembly-level debugging • AST analysis
 
 ---
 
@@ -26,7 +26,7 @@ This project presents a **production-ready** C++ Read-Eval-Print Loop (REPL) - a
 5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
 
 **Performance Achievements**:
-- **22% faster compilation** (120ms → 93ms) through dual-level parallelization
+- **Fast compilation** (93ms average) through optimized parallel pipeline
 - **Sub-100ms completion latency** with context-aware LSP integration  
 - **0.82s startup time** with intelligent caching systems
 - **150MB peak memory usage** during complex compilations
@@ -93,7 +93,7 @@ cpprepl/
 ### Key Components
 
 - **REPL Engine** (`repl.cpp`): Streamlined core logic (29% size reduction from refactoring)
-- **CompilerService** (`src/compiler/`): **Parallel compilation pipeline** with 22% performance improvement
+- **CompilerService** (`src/compiler/`): **Parallel compilation pipeline** with optimized performance
 - **ExecutionEngine** (`src/execution/`): Thread-safe symbol resolution and execution management
 - **LSP Integration** (`src/completion/`): clangd-based semantic completion with readline integration
 - **Signal Handler** (`segvcatch/`): Hardware exception to C++ exception translation
@@ -108,7 +108,7 @@ cpprepl/
 
 | System             | Compilation Model  | Performance | Error Handling                    | Hot Reload      | Backtrace Quality       | Completion | Open Source | Platform |
 | ------------------ | ------------------ | ----------- | --------------------------------- | --------------- | ----------------------- | ---------- | ----------- | -------- |
-| **cpprepl (this)** | Native, shared lib | **93ms avg** (22% faster) | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | **LSP semantic** | Yes         | Linux    |
+| **cpprepl (this)** | Native, shared lib | **93ms avg** | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | **LSP semantic** | Yes         | Linux    |
 | clang-repl         | LLVM JIT IR        | ~100ms      | Managed (JIT abort)               | No              | IR-level                | Basic      | Yes         | Multi    |
 | cling              | JIT/Interpreter    | ~80ms       | Managed (soft error)              | No              | Partial                 | Basic      | Yes         | Multi    |
 | Visual Studio HR   | Compiler-level     | ~200ms      | Patch revert / rollback           | Per instruction | Compiler map            | IntelliSense | No          | Windows  |
@@ -195,14 +195,14 @@ The system employs a **compile-then-link** approach rather than interpretation:
 
 - **Source-to-Shared-Library Pipeline**: Each user input is wrapped in C++ code and compiled into position-independent shared libraries (.so files) using Clang/GCC with `-shared -fPIC` flags
 - **Precompiled Headers**: Uses precompiled headers (precompiledheader.hpp.pch) to accelerate compilation times and reduce AST dump file sizes
-- **Parallel Compilation Architecture**: ✅ **IMPLEMENTED** - Dual-level parallelization achieving 22% performance improvement
+- **Parallel Compilation Architecture**: ✅ **IMPLEMENTED** - Optimized dual-level parallelization
   - **Inter-file Parallelism**: Multiple source files compiled simultaneously
   - **Intra-file Parallelism**: AST analysis and object compilation run in parallel using `std::async`
   - **Multi-core Scaling**: Linear performance scaling with available CPU cores
   - **Thread Configuration**: Auto-detects `hardware_concurrency()` with configurable thread limits
 
 **Performance Results:**
-- **Single File Compilation**: 120ms → 93ms (**22% improvement**)
+- **Single File Compilation**: **93ms average** (measured in Ubuntu 24.04 environment)
 - **Multi-file Projects**: Linear scaling with number of CPU cores
 - **Zero Breaking Changes**: Full backward compatibility maintained
 
@@ -741,7 +741,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ## Performance Characteristics
 
 ### Compilation Performance ✅ **OPTIMIZED WITH PARALLELIZATION**
-- **Single File (Optimized)**: **~93ms average** (22% improvement from 120ms sequential)
+- **Single File (Optimized)**: **~93ms average** (measured with parallel compilation pipeline)
 - **Dual-Level Parallelism**:
   - **Inter-file**: Multiple source files compiled simultaneously
   - **Intra-file**: AST analysis + object compilation run in parallel using `std::async`

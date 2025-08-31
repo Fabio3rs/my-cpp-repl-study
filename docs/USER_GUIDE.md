@@ -333,7 +333,7 @@ push_back    pop_back    size    empty    begin    end    ...
 **Compilation Performance:**
 - **Cache hit:** ~1-15μs execution time
 - **New compilation:** ~50-500ms depending on complexity  
-- **Parallel speedup:** 22% faster (120ms → 93ms average)
+- **Parallel speedup:** Optimized compilation pipeline (93ms average)
 - **Startup time:** ~0.82s with caching
 
 **Memory Usage:**

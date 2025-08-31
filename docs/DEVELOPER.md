@@ -24,7 +24,7 @@ The C++ REPL uses a **modular architecture** designed around **POSIX compliance*
 - **Core Module:** `repl.cpp` - 1,504 lines (down from 2,119, -29% reduction)
 - **Modular Code:** 4,555 lines across focused components
 - **Test Coverage:** 1,000+ lines across 5 test suites (95%+ coverage)
-- **Build Time:** ~93ms average compilation (22% improvement with parallelization)
+- **Build Time:** ~93ms average compilation (optimized with parallel pipeline)
 
 ### High-Level Architecture
 
@@ -580,7 +580,7 @@ static void loadFn_symbolName() {
 ```cpp
 auto result = compilerService.buildMultipleSourcesWithAST(compiler, libname, sources, std);
 // Automatically uses std::thread::hardware_concurrency() threads
-// 22% performance improvement measured
+// Parallel compilation pipeline optimization
 ```
 
 ## Testing and Quality Assurance
