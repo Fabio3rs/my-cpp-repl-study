@@ -177,10 +177,12 @@ Stack trace: [automatic analysis provided]
 | Command | Description | Example |
 |---------|-------------|---------|
 | `#includedir <path>` | Add include directory | `#includedir /usr/local/include` |
+| `#include <header>` | Include header file with compiler validation | `#include <vector>` |
+| `#include "file"` | Include local file with compiler validation | `#include "myheader.h"` |
 | `#lib <name>` | Link with library | `#lib pthread` |
 | `#compilerdefine <def>` | Add preprocessor definition | `#compilerdefine DEBUG=1` |
 | `#loadprebuilt <path>` | Load prebuilt library | `#loadprebuilt ./mylib.so` |
-| `#eval <file>` | Execute C++ file | `#eval mycode.cpp` |
+| `#eval <file>` | Execute C++ file with extern declaration handling | `#eval mycode.cpp` |
 | `#return <expr>` | Evaluate and print expression | `#return x + y` |
 | `#lazyeval <code>` | Lazy evaluation mode | `#lazyeval func_call()` |
 | `#batch_eval <file>` | Batch evaluation | `#batch_eval commands.txt` |
@@ -221,8 +223,47 @@ Stack trace: [automatic analysis provided]
 ```cpp
 >>> #include <algorithm>
 >>> #include <numeric>
-✓ Headers processed automatically
+✓ Headers processed automatically with compiler validation
 ```
+
+## ⚠️ **CRITICAL: Include vs Eval Usage**
+
+### Using `#include` vs `#eval` - Important Distinction
+
+**For .cpp files with global variables, prefer `#eval` over `#include`:**
+
+❌ **DON'T DO THIS** - Causes double-free errors:
+```cpp
+// file: globals.cpp
+std::vector<int> numbers = {1, 2, 3};
+
+// In REPL:
+>>> #include "globals.cpp"  // ❌ DANGEROUS!
+```
+
+✅ **DO THIS INSTEAD** - Safe approach:
+```cpp
+// file: globals.cpp  
+std::vector<int> numbers = {1, 2, 3};
+
+// In REPL:
+>>> #eval globals.cpp       // ✅ SAFE!
+```
+
+**Why this matters:**
+
+- `#include "file.cpp"`: Each .so instance gets its own copy of global variables
+- On exit: Multiple destructors try to free the same resources → **double-free crash**
+- `#eval file.cpp`: REPL manages extern declarations properly, preventing conflicts
+
+**Safe Usage Guidelines:**
+
+| File Type | Use | Reason |
+|-----------|-----|--------|
+| `.h/.hpp` headers | `#include` | ✅ Safe - declarations only |
+| System headers `<header>` | `#include` | ✅ Safe - standard library |
+| `.cpp` with globals | `#eval` | ✅ Safe - REPL manages extern declarations |
+| `.cpp` without globals | Either | ✅ Safe - no shared state |
 
 ## Advanced Features
 
@@ -415,9 +456,11 @@ Enable verbose output for debugging:
 - Preload common libraries at session start
 
 ### 4. Code Organization
-- Save complex code to files and use `#eval`
+- Save complex code to files and use `#eval` for .cpp files
+- Use `#include` only for headers (.h/.hpp) and system headers
 - Use `#batch_eval` for project setup
 - Organize includes at session beginning
+- **⚠️ NEVER use `#include` on .cpp files with global variables** - use `#eval` instead
 
 ## Integration Examples
 

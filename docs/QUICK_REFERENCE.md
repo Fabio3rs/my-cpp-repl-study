@@ -20,11 +20,15 @@ Options:
 | Command | Purpose | Example |
 |---------|---------|---------|
 | `#includedir <path>` | Add include directory | `#includedir /usr/local/include` |
+| `#include <header>` | Include header (compiler validated) | `#include <vector>` |
+| `#include "file"` | Include local file ⚠️ See safety note | `#include "header.h"` |
 | `#lib <name>` | Link with library | `#lib pthread` |
 | `#compilerdefine <def>` | Add preprocessor definition | `#compilerdefine DEBUG=1` |
 | `#loadprebuilt <path>` | Load prebuilt library | `#loadprebuilt ./mylib.so` |
-| `#eval <file>` | Execute C++ file | `#eval mycode.cpp` |
+| `#eval <file>` | Execute C++ file (safe for globals) | `#eval mycode.cpp` |
 | `#return <expr>` | Evaluate and print expression | `#return x + y` |
+
+**⚠️ SAFETY WARNING:** For .cpp files with global variables, use `#eval` instead of `#include` to prevent double-free crashes!
 
 ### Advanced Commands
 | Command | Purpose | Example |

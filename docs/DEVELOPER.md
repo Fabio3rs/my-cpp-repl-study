@@ -491,7 +491,55 @@ namespace execution {
 
 ## Advanced Features Implementation
 
-### 1. Signal-to-Exception Translation
+### 1. Include System with Compiler Validation
+
+**Critical Implementation Detail:**
+
+The REPL provides two mechanisms for file inclusion with different safety characteristics:
+
+```cpp
+// Implementation in repl.cpp (lines 939-1004)
+if (line.starts_with("#include")) {
+    std::regex includePattern(R"(#include\s*["<]([^">]+)[">])");
+    std::smatch match;
+    
+    if (std::regex_search(line, match, includePattern)) {
+        std::string fileName = match[1].str();
+        // Process with compiler validation...
+    }
+}
+```
+
+**Safety Model:**
+
+| Mechanism | Use Case | Global State Handling | Safety |
+|-----------|----------|----------------------|---------|
+| `#include "file.cpp"` | ❌ Dangerous for globals | Each .so gets own copy | Double-free on exit |
+| `#eval file.cpp` | ✅ Recommended | REPL manages externs | Safe destruction |
+| `#include <header>` | ✅ Safe | Standard library | No issues |
+| `#include "header.h"` | ✅ Safe | Declarations only | No issues |
+
+**Why Double-Free Occurs:**
+
+```cpp
+// When using #include "globals.cpp":
+// Each compiled .so contains:
+std::vector<int> numbers = {1, 2, 3};  // Independent instance per .so
+
+// On program exit:
+// .so₁ destructor: numbers.~vector()  ✓
+// .so₂ destructor: numbers.~vector()  ✓  
+// .so₃ destructor: numbers.~vector()  ❌ CRASH - already freed
+```
+
+**Safe Alternative with #eval:**
+
+```cpp
+// REPL generates extern declarations automatically:
+extern std::vector<int> numbers;  // Shared reference, not duplicate
+```
+
+### 2. Signal-to-Exception Translation
 
 **Implementation in main.cpp:**
 ```cpp

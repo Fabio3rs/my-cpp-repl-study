@@ -464,6 +464,50 @@ public:
 
 ## Command System API
 
+### Built-in REPL Commands
+
+The REPL system includes the following built-in commands:
+
+#### Include System Commands
+```cpp
+/**
+ * @brief Include a header file with compiler validation
+ * @syntax #include <header> or #include "file"
+ * @warning For .cpp files with global variables, prefer #eval to prevent double-free issues
+ */
+#include <vector>        // ✅ Safe: Standard library headers  
+#include "header.h"      // ✅ Safe: Custom headers
+#include "globals.cpp"   // ❌ DANGEROUS: Use #eval instead
+
+/**
+ * @brief Add include directory to compiler search path
+ * @syntax #includedir <path>
+ */
+#includedir /usr/local/include
+
+/**
+ * @brief Evaluate C++ file with proper extern declaration handling
+ * @syntax #eval <file>
+ * @note Preferred over #include for .cpp files with global variables
+ */
+#eval mycode.cpp         // ✅ Safe: REPL manages global state properly
+```
+
+#### Build Configuration Commands
+```cpp
+/**
+ * @brief Link with library
+ * @syntax #lib <name>
+ */
+#lib pthread
+
+/**
+ * @brief Add preprocessor definition
+ * @syntax #compilerdefine <definition>
+ */
+#compilerdefine DEBUG=1
+```
+
 ### CommandRegistry Class (commands/command_registry.hpp)
 
 ```cpp

@@ -11,10 +11,13 @@
 // Preprocessor definitions
 #compilerdefine DEBUG=1
 
-// Include headers
+// ✅ SAFE: Include standard library headers
 #include <thread>
 #include <chrono>
 #include <mutex>
+
+// ✅ SAFE: Include custom headers (declarations only)
+// #include "safe_header.h"  // Would work if file exists
 
 // Global mutex for thread safety
 std::mutex output_mutex;
@@ -37,5 +40,10 @@ for (int i = 0; i < 3; ++i) {
 for (auto& t : threads) {
     t.join();
 }
+
+// ✅ SAFE: Use #eval for .cpp files with globals
+// This demonstrates the correct way to include code with global state
+// #eval examples/math_functions.cpp
+// test_math_functions();  // Would work after #eval
 
 #return threads.size()
