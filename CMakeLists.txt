@@ -134,6 +134,7 @@ set(CPPREPL_LIB_SOURCES
     src/compiler/compiler_service.cpp
     src/execution/execution_engine.cpp
     src/execution/symbol_resolver.cpp
+    src/completion/simple_readline_completion.cpp
 
     # Utility components
     utility/backtraced_exceptions.cpp

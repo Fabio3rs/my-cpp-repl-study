@@ -352,3 +352,9 @@ TEST_F(CompilerServiceTest, SetAstContext_UpdatesContext) {
     EXPECT_EQ(compilerService->getAstContext(), newContext);
     EXPECT_NE(compilerService->getAstContext(), astContext);
 }
+
+TEST_F(CompilerServiceTest, IncludeExists) {
+    EXPECT_TRUE(compilerService->checkIncludeExists(*buildSettings, "vector"));
+    EXPECT_FALSE(compilerService->checkIncludeExists(
+        *buildSettings, "non_existing_include.hpp"));
+}

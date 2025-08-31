@@ -237,6 +237,9 @@ class CompilerService {
         return maxThreads_;
     }
 
+    static bool checkIncludeExists(const BuildSettings &settings,
+                                   const std::string &includePath);
+
   private:
     // === Internal Helper Methods ===
 

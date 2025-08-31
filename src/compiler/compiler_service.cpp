@@ -38,6 +38,16 @@ CompilerService::CompilerService(
     }
 }
 
+bool CompilerService::checkIncludeExists(const BuildSettings &settings,
+                                         const std::string &includePath) {
+    auto includeDirsArgs = settings.getIncludeDirectoriesStr();
+    std::string command = std::format("clang++ -x c++ -E -P {} - < /dev/null "
+                                      "-include {} 2>/dev/null",
+                                      includeDirsArgs, includePath);
+    auto [output, returnCode] = runProgramGetOutput(command);
+    return returnCode == 0;
+}
+
 // === Helper Methods ===
 
 std::string

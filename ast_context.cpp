@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iterator>
 #include <mutex>
+#include <readline/chardefs.h>
 #include <system_error>
 
 namespace analysis {
@@ -21,13 +22,17 @@ static std::mutex contextWriteMutex;
  * duração do REPL.
  */
 std::string AstContext::outputHeader_;
+std::unordered_set<std::string> AstContext::includedFiles_;
 
-void AstContext::addInclude(const std::string &includePath) {
+bool AstContext::addInclude(const std::string &includePath) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
         includedFiles_.insert(includePath);
         outputHeader_ += std::format("#include \"{}\"\n", includePath);
+        return true;
     }
+
+    return false;
 }
 
 void AstContext::addDeclaration(const std::string &declaration) {

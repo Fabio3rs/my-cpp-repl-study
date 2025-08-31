@@ -32,8 +32,9 @@ class AstContext {
     /**
      * @brief Adiciona um include ao header de saída
      * @param includePath Caminho do arquivo de include
+     * @return true se o include foi adicionado, false se já existia
      */
-    void addInclude(const std::string &includePath);
+    static bool addInclude(const std::string &includePath);
 
     /**
      * @brief Adiciona uma declaração extern ao header de saída
@@ -97,7 +98,7 @@ class AstContext {
      * funcionalidade básica do REPL.
      */
     static std::string outputHeader_;
-    std::unordered_set<std::string> includedFiles_;
+    static std::unordered_set<std::string> includedFiles_;
     mutable size_t lastHeaderSize_ = 0;
 };
 

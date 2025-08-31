@@ -158,3 +158,12 @@ TEST_F(ReplTests, FunctionOverloading) {
     ASSERT_TRUE(extExecRepl(cmd));
     ASSERT_EQ(10.0, std::any_cast<double>(getResultRepl("doubleResult")));
 }
+
+TEST_F(ReplTests, IncludesAreWorking) {
+    ASSERT_TRUE(extExecRepl("#include <numeric>"));
+    ASSERT_TRUE(extExecRepl("#include <vector>"));
+
+    ASSERT_TRUE(extExecRepl("std::vector<int> numbers = {1, 2, 3, 4, 5};"));
+    ASSERT_EQ(15, std::any_cast<int>(getResultRepl(
+                      "std::accumulate(numbers.begin(), numbers.end(), 0)")));
+}

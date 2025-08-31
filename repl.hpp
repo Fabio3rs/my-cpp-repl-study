@@ -95,6 +95,7 @@ struct ReplState {
     std::unordered_map<std::string, void (*)()> varPrinterAddresses;
     std::unordered_map<std::string, EvalResult> evalResults;
     std::vector<std::function<bool()>> lazyEvalFns;
+    std::unordered_set<std::string> includedFiles;
 };
 
 auto analyzeCustomCommands(

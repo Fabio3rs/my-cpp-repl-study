@@ -7,6 +7,7 @@
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
 #include "compiler/compiler_service.hpp"
+#include "completion/simple_readline_completion.hpp"
 #include "execution/execution_engine.hpp"
 #include "execution/symbol_resolver.hpp"
 #include "repl.hpp"
@@ -48,6 +49,9 @@ static BuildSettings buildSettings;
 static ReplState replState;
 int verbosityLevel = 0; // Default to quiet mode (errors only)
 
+// Completion scope para autocompletion
+static std::unique_ptr<completion::SimpleCompletionScope> completionScope;
+
 // Callback para merge de variáveis no CompilerService
 static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
@@ -55,6 +59,11 @@ static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
             replState.varsNames.insert(var.name);
             replState.allTheVariables.push_back(var);
         }
+    }
+
+    // Atualizar completion com novo contexto
+    if (completionScope) {
+        completionScope->updateContext(replState);
     }
 }
 
@@ -331,6 +340,11 @@ void mergeVars(const std::vector<VarDecl> &vars) {
             replState.allTheVariables.push_back(var);
         }
     }
+
+    // Atualizar completion
+    if (completionScope) {
+        completionScope->updateContext(replState);
+    }
 }
 
 auto analyzeCustomCommands(
@@ -415,11 +429,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -929,27 +942,48 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         if (std::regex_search(line, match, includePattern)) {
             if (match.size() > 1) {
                 std::string fileName = match[1].str();
-                std::cout << std::format("📁 Including file: {}\n", fileName);
+                if (verbosityLevel >= 1) {
+                    std::cout
+                        << std::format("📁 Including file: {}\n", fileName);
+                }
 
                 std::filesystem::path p(fileName);
 
                 try {
                     p = std::filesystem::absolute(
                         std::filesystem::canonical(p));
-                    std::cout
-                        << std::format("   → Resolved path: {}\n", p.string());
+
+                    if (verbosityLevel >= 2) {
+                        std::cout << std::format("   → Resolved path: {}\n",
+                                                 p.string());
+                    }
                 } catch (const std::filesystem::filesystem_error &e) {
-                    std::cout << std::format(
-                        "   ⚠️  Warning: Could not resolve path - {}\n",
-                        e.what());
+                    if (verbosityLevel >= 2) {
+                        std::cout << std::format(
+                            "   ⚠️  Warning: Could not canonicalize path - {}\n",
+                            e.what());
+                    }
+
+                    if (!compilerService->checkIncludeExists(buildSettings,
+                                                             p.string())) {
+                        std::cerr << std::format(
+                            "❌ Error: Included file does not exist: {}\n",
+                            p.string());
+                        return true;
+                    }
                 }
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
                     // TODO: Implementar recompilação baseada em contexto AST
-                    replState.shouldRecompilePrecompiledHeader = true;
-                    std::cout
-                        << "   🔄 Marked for precompiled header rebuild\n";
+                    replState.shouldRecompilePrecompiledHeader =
+                        analysis::AstContext::addInclude(p.string());
+
+                    if (replState.shouldRecompilePrecompiledHeader &&
+                        verbosityLevel >= 2) {
+                        std::cout
+                            << "   🔄 Marked for precompiled header rebuild\n";
+                    }
                 }
             } else {
                 std::cerr << "❌ Error: Could not parse include directive\n";
@@ -1421,6 +1455,10 @@ int ext_build_precompiledheader() { return build_precompiledheader(); }
 void initRepl() {
     writeHeaderPrintOverloads();
     build_precompiledheader();
+
+    // Inicializar completion com estado atual do REPL
+    completionScope =
+        std::make_unique<completion::SimpleCompletionScope>(replState);
 
     // Criar um contexto AST inicial para inicializar o arquivo
     // decl_amalgama.hpp
