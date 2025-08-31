@@ -110,6 +110,8 @@ class AstContext {
 
     static bool staticSaveHeaderToFile(const std::string &filename);
 
+    static void regenerateOutputHeaderWithSnippets();
+
   private:
     /**
      * @brief Header de declarações com duração estática

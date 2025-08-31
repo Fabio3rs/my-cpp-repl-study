@@ -326,3 +326,48 @@ TEST_F(AstContextTest, LargeContent_Performance_HandlesEfficiently) {
               std::string::npos)
         << "Should contain last variable";
 }
+
+TEST_F(AstContextTest, SnippetsAndOutputHeaderAreSynced) {
+    namespace fs = std::filesystem;
+
+    // 1) Montar a header com métodos padrão do ast context
+    const std::string fakeInclude = "my_fake_dep.hpp";
+    ASSERT_TRUE(context->addInclude(fakeInclude)); // primeiro include insere
+    ASSERT_FALSE(
+        context->addInclude(fakeInclude)); // segundo include é ignorado
+    EXPECT_TRUE(context->isFileIncluded(fakeInclude)); // sanity check
+
+    context->addDeclaration("extern int foo();"); // declaração simples
+
+    // Para line directive, usamos um caminho válido qualquer (o arquivo não
+    // precisa existir pro método)
+    fs::path dummyPath = fs::current_path() / "dummy_source.cpp";
+    context->addLineDirective(/*line*/ 42, dummyPath);
+
+    // 2) Salvar a header gerada (estado "antes")
+    fs::path tmp1 = fs::temp_directory_path() / "header_before.hpp";
+    ASSERT_TRUE(context->saveHeaderToFile(tmp1.string()));
+    std::string before = context->getOutputHeader();
+    ASSERT_FALSE(before.empty());
+
+    // 3) Regerar com async (thread-safe internamente)
+    context->regenerateOutputHeaderWithSnippets();
+
+    // 4) Salvar a header depois de regerar
+    fs::path tmp2 = fs::temp_directory_path() / "header_after.hpp";
+    ASSERT_TRUE(context->saveHeaderToFile(tmp2.string()));
+    std::string after = context->getOutputHeader();
+    ASSERT_FALSE(after.empty());
+
+    // 5) Comparar ambas – devem ser exatamente iguais
+    EXPECT_EQ(after, before)
+        << "Output header reconstruída difere da original: "
+           "codeSnippets_ e outputHeader_ não estão sincronizados.";
+
+    // 6) Sinaliza que a API de mudança de header funciona e é thread-safe
+    // (hasHeaderChanged observa tamanho e faz cache).
+    // Uma chamada imediata deve "consumir" a mudança.
+    EXPECT_TRUE(context->hasHeaderChanged()); // primeira checagem vê mudança
+    EXPECT_FALSE(
+        context->hasHeaderChanged()); // segunda checagem não vê mudança
+}

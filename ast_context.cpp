@@ -138,6 +138,14 @@ bool AstContext::staticSaveHeaderToFile(const std::string &filename) {
     return headerOutput.good();
 }
 
+void AstContext::regenerateOutputHeaderWithSnippets() {
+    std::scoped_lock<std::mutex> lock(contextWriteMutex);
+    outputHeader_.clear();
+    for (const auto &snippet : codeSnippets_) {
+        outputHeader_ += snippet.codeSnippet;
+    }
+}
+
 ContextualAstAnalyzer::ContextualAstAnalyzer(
     std::shared_ptr<AstContext> context)
     : context_(context) {
