@@ -2,6 +2,7 @@
 
 #include "repl.hpp"
 #include "utility/assembly_info.hpp"
+#include "utility/eval_scope_exit.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <exceptdefs.h>
@@ -219,6 +220,8 @@ int main(int argc, char **argv) {
 
     initNotifications("cpprepl");
     initRepl();
+
+    EvalOnScopeExit shutdownReplOnExit([]() { shutdownRepl(); });
 
     bool enableSignalHandlers = false;
     std::string scriptFile;

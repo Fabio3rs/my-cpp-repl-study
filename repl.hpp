@@ -26,6 +26,7 @@ struct EvalResult {
 void initNotifications(std::string_view appName);
 void notifyError(std::string_view summary, std::string_view msg);
 void initRepl();
+void shutdownRepl();
 void repl();
 bool extExecRepl(std::string_view cmd);
 void installCtrlCHandler();

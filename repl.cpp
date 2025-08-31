@@ -31,6 +31,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <libnotify/notify.h>
 #include <mutex>
 #include <readline/history.h>
 #include <readline/readline.h>
@@ -51,6 +52,20 @@ int verbosityLevel = 0; // Default to quiet mode (errors only)
 
 // Completion scope para autocompletion
 static std::unique_ptr<completion::SimpleCompletionScope> completionScope;
+
+static std::string_view trim(const std::string_view str) noexcept {
+    auto is_not_blank = [](unsigned char ch) {
+        return !std::isblank(ch) && ch != '\n' && ch != '\r';
+    };
+
+    auto first = std::find_if(str.begin(), str.end(), is_not_blank);
+    if (first == str.end()) {
+        return {};
+    }
+    auto last = std::find_if(str.rbegin(), str.rend(), is_not_blank).base();
+    return str.substr(std::distance(str.begin(), first),
+                      std::distance(first, last));
+}
 
 // Callback para merge de variáveis no CompilerService
 static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
@@ -927,6 +942,7 @@ bool isDefinitionCode(const std::string &code) {
 // moved into replState
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
+    lineview = trim(lineview);
     std::string line(lineview);
     if (line == "exit") {
         return false;
@@ -936,7 +952,12 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
-    if (line.starts_with("#include")) {
+    /**
+     * If this is multiline, this must be a code block, not just an include
+     * directive
+     */
+    if (line.starts_with("#include") &&
+        line.find_first_of('\n') == std::string::npos) {
         std::regex includePattern(R"(#include\s*["<]([^">]+)[">])");
         std::smatch match;
 
@@ -1475,8 +1496,21 @@ void initRepl() {
     context->saveHeaderToFile("decl_amalgama.hpp");
 }
 
+void shutdownRepl() {
+    if (completionScope) {
+        completionScope.reset();
+    }
+#ifndef NUSELIBNOTIFY
+    notify_uninit();
+#endif
+}
+
 void initNotifications(std::string_view appName) {
 #ifndef NUSELIBNOTIFY
+    if (notify_is_initted()) {
+        return;
+    }
+
     notify_init(appName.data());
 #else
     std::cerr << "Notifications not available" << std::endl;
