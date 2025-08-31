@@ -1,53 +1,96 @@
-# C++ REPL v2.0 - Cronograma de Melhorias e Roadmap para Próxima Versão
+# C++ REPL v1.5-alpha → v2.0 - Roadmap e Planning
 
-## 📊 **Estado Atual do Projeto (Base para v2.0)**
+## 📊 **Estado Atual: v1.5-alpha Release Ready**
 
-### Metrics e Arquitetura Atual
+### Métricas do Sistema v1.5-alpha
 ```
-🏗️ Sistema Modular Completo:        7.481 linhas totais
-├── Core REPL (main loop):           1.503 linhas (20.1%)
-├── Main program (batch + signals):   467 linhas (6.2%)
-├── Modular Architecture:            1.896 linhas (25.3%)
-├── Headers (interfaces):            1.342 linhas (17.9%)
-└── Testing Framework:               2.143 linhas (28.6%)
+🏗️ Sistema Modular Estável:          ~7.500 linhas totais  
+├── Core REPL (main loop):           1.463 linhas (19.5%)
+├── Main program (batch + signals):   467 linhas (6.2%)  
+├── Modular Architecture:            ~1.900 linhas (25.3%)
+├── Headers (interfaces):            ~1.350 linhas (18.0%)
+└── Testing Framework:               ~2.143 linhas (28.6%)
 
-🎯 Modular Components:
-├── src/compiler/compiler_service.cpp     - Pipeline de compilação
-├── src/execution/execution_engine.cpp    - Motor de execução
-├── src/execution/symbol_resolver.cpp     - Sistema de símbolos
-├── src/completion/clang_completion.cpp   - Autocompletion (mock)
-└── src/completion/readline_integration.cpp - Integração readline
+🎯 Componentes Funcionais:
+├── src/compiler/compiler_service.cpp     - Pipeline paralelo FUNCIONANDO
+├── src/execution/execution_engine.cpp    - Motor de execução FUNCIONANDO  
+├── src/execution/symbol_resolver.cpp     - Resolução de símbolos FUNCIONANDO
+├── src/completion/simple_readline_completion.cpp - Completion básico FUNCIONANDO
+└── src/completion/clang_completion.cpp   - LSP completion MOCK (v2.0 target)
 ```
 
-### Status de Funcionalidades Base
-- ✅ **Arquitetura Modular**: Sistema completamente refatorado
-- ✅ **Thread Safety**: Sincronização completa com std::scoped_lock
-- ✅ **Testing Framework**: 2.143 linhas de testes abrangentes
-- ✅ **Symbol Resolution**: Sistema trampoline otimizado
-- ✅ **Error Handling**: CompilerResult<T> template system
-- ✅ **Signal Handling**: SIGSEGV, SIGFPE, SIGINT recovery
-- ✅ **Batch Processing**: Flag -r para execução de arquivos
-- ✅ **Plugin System**: #loadprebuilt command framework
+### Status de Funcionalidades v1.5-alpha ✅
+- ✅ **Interactive REPL**: Execução linha-a-linha com persistência de estado
+- ✅ **Compilação Dinâmica**: 80-95ms average com pipeline paralelo
+- ✅ **Signal Handling**: Recuperação de SIGSEGV, SIGFPE, SIGINT (flag -s)
+- ✅ **Batch Processing**: Execução de arquivos com comandos (flag -r)
+- ✅ **Simple Completion**: Completion básico via readline
+- ✅ **Error Recovery**: Recuperação graciosa de erros de compilação/runtime
+- ✅ **Plugin System**: Comando #loadprebuilt funcional
+- ✅ **Testing Coverage**: 13/14 testes passando (92.8% success rate)
+- ✅ **Thread Safety**: Sincronização completa do sistema
+- ✅ **Include Support**: Suporte a #include (com limitações conhecidas)
 
 ---
 
-## 🚀 **FASE 2: Finalização v2.0 (Ready for Merge)**
+## 🔧 **FIXME Items para v2.0**
 
-### **P0 - Critical for v2.0 Release** 🚨
+### **Issues Conhecidas (Precisa Corrigir)**
+- 🔧 **FIXME**: Redefinição de variáveis em includes complexos
+  - Teste CodeWithIncludes falhando por conflito de tipos
+  - Impacta projetos C++ complexos com múltiplos includes
+- 🔧 **FIXME**: Otimização de memória para sessões longas  
+  - Possível acumulação de memória em uso prolongado
+  - Impacta sessões interativas estendidas
 
-#### **1. Libclang Integration** ⏱️ 8-12 horas
-- [ ] **Real Clang Completion**: Substituir mocks por implementação real
-  - Integrar `#ifdef CLANG_COMPLETION_ENABLED` com libclang
-  - Translation unit parsing real
-  - Context-aware completions baseados no estado do REPL
-  - **Deliverable**: Autocompletion semântico funcional
+---
 
-#### **2. CMake and Build System** ⏱️ 4-6 horas
-- [ ] **Dependency Management**: Configuração robusta
-  - libclang detection e linking
-  - Fallback gracioso quando libclang indisponível
-  - CI/CD pipeline atualizado
+## 🚀 **FASE 2: v2.0 Development Plan**
+
+### **P1 - Features para v2.0** ⏱️ 25-35 horas total
+
+#### **1. LSP Integration Real** ⏱️ 8-12 horas
+- [ ] **Semantic Completion**: Substituir mock por clangd real
+  - Integrar clangd via JSON-RPC LSP protocol
+  - Context-aware completions com estado do REPL
+  - Function signatures e member completion
+  - Error diagnostics em tempo real
+  - **Deliverable**: Autocompletion profissional funcionando
+
+#### **2. Build System Production** ⏱️ 4-6 horas  
+- [ ] **CMake Robusto**: Dependency management enterprise
+  - Detecção automática de libclang com fallback gracioso
+  - Multi-platform build (Ubuntu/Debian foco)
+  - CI/CD pipeline completo
+  - Package generation (deb/rpm)
   - **Deliverable**: Build system production-ready
+
+#### **3. Documentation Suite** ⏱️ 6-8 horas
+- [ ] **Documentação Completa**: Guias profissionais
+  - Getting started guide (<5 min setup)
+  - User guide com exemplos avançados  
+  - API documentation para plugin development
+  - Troubleshooting guide
+  - **Deliverable**: Documentation ready para usuários finais
+
+#### **4. Performance Enhancements** ⏱️ 4-6 horas
+- [ ] **Symbol Caching**: Sistema de cache persistente
+  - Cache de símbolos em disco
+  - Startup performance optimization
+  - Memory pool management
+  - **Target**: <50ms compilation com cache
+
+#### **5. Advanced Features** ⏱️ 6-10 horas
+- [ ] **Multi-file Support**: Projetos complexos
+- [ ] **Debugging Integration**: GDB integration básico
+- [ ] **Package Management**: vcpkg/Conan integration
+- [ ] **Cross-platform**: Windows/macOS compatibility plan
+
+### **P2 - Future Plans (v3.0+)**
+- 📋 **IDE Integration**: VSCode extension
+- 📋 **Cloud REPL**: Web-based interface  
+- 📋 **Performance Profiling**: Built-in profiler
+- 📋 **Security Sandboxing**: Isolated execution
 
 #### **3. Documentation and Examples** ⏱️ 6-8 horas
 - [ ] **User Documentation**: Manual completo de uso

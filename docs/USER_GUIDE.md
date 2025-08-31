@@ -1,8 +1,24 @@
-# C++ REPL - User Documentation
+# C++ REPL v1.5-alpha - User Guide
 
-[![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/) [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites)
+[![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/) [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites) [![Version](https://img.shields.io/badge/Version-1.5--alpha-yellow.svg)](.) 
 
-**C++ REPL** is a production-ready interactive C++ development environment that compiles your code to native machine code and executes it in real-time. Unlike interpretation-based solutions, this REPL provides **native performance** with **interactive safety** through advanced error recovery.
+**C++ REPL v1.5-alpha** is an interactive C++ development environment that compiles your code to native machine code and executes it in real-time. This alpha release provides stable core functionality with **simple completion**, **crash-safe execution**, and **parallel compilation**.
+
+## ✅ **Current Features (v1.5-alpha)**
+
+- ✅ **Interactive C++ execution** - Line-by-line compilation and execution  
+- ✅ **Variable persistence** - Variables maintain state across REPL sessions
+- ✅ **Signal handling** (`-s` flag) - Graceful recovery from crashes
+- ✅ **Batch processing** (`-r` flag) - Execute C++ command files
+- ✅ **Simple autocompletion** - Basic keyword and symbol completion
+- ✅ **Include support** - `#include` directive functionality
+- ✅ **Plugin system** - Load pre-built libraries with `#loadprebuilt`
+
+## 🚧 **Coming in v2.0**
+
+- 🚧 **Advanced LSP completion** - Real clangd integration for semantic completion
+- 🚧 **Enhanced error diagnostics** - Rich error information with code context  
+- 🚧 **Multi-file project support** - Complex project handling
 
 ## Table of Contents
 
