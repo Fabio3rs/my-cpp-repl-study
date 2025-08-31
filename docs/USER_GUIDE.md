@@ -104,10 +104,10 @@ Start the REPL and begin coding immediately:
 **Example Session:**
 ```cpp
 >>> int x = 42;
-✓ Compiled successfully (63ms)
+✓ Compiled successfully (93ms)
 
 >>> std::vector<int> numbers = {1, 2, 3, 4, 5};
-✓ Compiled successfully (89ms)
+✓ Compiled successfully (95ms)
 
 >>> #return std::accumulate(numbers.begin(), numbers.end(), 0)
 15
@@ -332,12 +332,13 @@ push_back    pop_back    size    empty    begin    end    ...
 
 **Compilation Performance:**
 - **Cache hit:** ~1-15μs execution time
-- **New compilation:** ~50-500ms depending on complexity
-- **Parallel speedup:** 47% faster (120ms → 63ms average)
-- **Startup time:** ~0.54s with caching
+- **New compilation:** ~50-500ms depending on complexity  
+- **Parallel speedup:** 22% faster (120ms → 93ms average)
+- **Startup time:** ~0.82s with caching
 
 **Memory Usage:**
 - **Base footprint:** ~8-12MB
+- **Peak memory:** ~150MB during complex compilations
 - **Per compilation:** ~2-4MB (temporary)
 - **Shared memory model:** Efficient code sharing
 

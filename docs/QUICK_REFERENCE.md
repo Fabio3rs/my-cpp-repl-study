@@ -72,7 +72,7 @@ cmake .. && make -j$(nproc)
 ### Basic Usage
 ```cpp
 >>> int x = 42;
-✓ Compiled successfully (63ms)
+✓ Compiled successfully (93ms)
 
 >>> std::vector<int> v = {1, 2, 3};
 ✓ Compiled successfully (89ms)

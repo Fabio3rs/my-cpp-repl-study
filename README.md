@@ -6,11 +6,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites)
 [![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-~7481-informational.svg)](.)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success.svg)](.)
-[![Performance](https://img.shields.io/badge/Compilation-63ms%20avg-brightgreen.svg)](.)
+[![Performance](https://img.shields.io/badge/Compilation-93ms%20avg-brightgreen.svg)](.)
 
 **Research Project**: Interactive C++ development through dynamic compilation and advanced error handling
 
-**Key Features**: Dynamic compilation • Signal-to-exception translation • **Parallel compilation (47% faster)** • **LSP semantic completion** • Real-time function replacement • Assembly-level debugging • AST analysis
+**Key Features**: Dynamic compilation • Signal-to-exception translation • **Parallel compilation (22% faster)** • **LSP semantic completion** • Real-time function replacement • Assembly-level debugging • AST analysis
 
 ---
 
@@ -26,9 +26,10 @@ This project presents a **production-ready** C++ Read-Eval-Print Loop (REPL) - a
 5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
 
 **Performance Achievements**:
-- **47% faster compilation** (120ms → 63ms) through dual-level parallelization
-- **Sub-100ms completion latency** with context-aware LSP integration
-- **0.54s startup time** with intelligent caching systems
+- **22% faster compilation** (120ms → 93ms) through dual-level parallelization
+- **Sub-100ms completion latency** with context-aware LSP integration  
+- **0.82s startup time** with intelligent caching systems
+- **150MB peak memory usage** during complex compilations
 - **Linear scaling** with available CPU cores for multi-file processing
 
 This approach offers **native performance** (no interpretation overhead) while maintaining **interactive safety** through sophisticated error recovery. The system demonstrates advanced techniques in parallel compilation, runtime linking, LSP integration, assembly-level programming, and hardware exception handling - making it valuable both as a **practical development tool** and as a **research platform** for understanding modern systems programming concepts.
@@ -92,7 +93,7 @@ cpprepl/
 ### Key Components
 
 - **REPL Engine** (`repl.cpp`): Streamlined core logic (29% size reduction from refactoring)
-- **CompilerService** (`src/compiler/`): **Parallel compilation pipeline** with 47% performance improvement
+- **CompilerService** (`src/compiler/`): **Parallel compilation pipeline** with 22% performance improvement
 - **ExecutionEngine** (`src/execution/`): Thread-safe symbol resolution and execution management
 - **LSP Integration** (`src/completion/`): clangd-based semantic completion with readline integration
 - **Signal Handler** (`segvcatch/`): Hardware exception to C++ exception translation
@@ -107,7 +108,7 @@ cpprepl/
 
 | System             | Compilation Model  | Performance | Error Handling                    | Hot Reload      | Backtrace Quality       | Completion | Open Source | Platform |
 | ------------------ | ------------------ | ----------- | --------------------------------- | --------------- | ----------------------- | ---------- | ----------- | -------- |
-| **cpprepl (this)** | Native, shared lib | **63ms avg** (47% faster) | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | **LSP semantic** | Yes         | Linux    |
+| **cpprepl (this)** | Native, shared lib | **93ms avg** (22% faster) | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | **LSP semantic** | Yes         | Linux    |
 | clang-repl         | LLVM JIT IR        | ~100ms      | Managed (JIT abort)               | No              | IR-level                | Basic      | Yes         | Multi    |
 | cling              | JIT/Interpreter    | ~80ms       | Managed (soft error)              | No              | Partial                 | Basic      | Yes         | Multi    |
 | Visual Studio HR   | Compiler-level     | ~200ms      | Patch revert / rollback           | Per instruction | Compiler map            | IntelliSense | No          | Windows  |
@@ -194,14 +195,14 @@ The system employs a **compile-then-link** approach rather than interpretation:
 
 - **Source-to-Shared-Library Pipeline**: Each user input is wrapped in C++ code and compiled into position-independent shared libraries (.so files) using Clang/GCC with `-shared -fPIC` flags
 - **Precompiled Headers**: Uses precompiled headers (precompiledheader.hpp.pch) to accelerate compilation times and reduce AST dump file sizes
-- **Parallel Compilation Architecture**: ✅ **IMPLEMENTED** - Dual-level parallelization achieving 47% performance improvement
+- **Parallel Compilation Architecture**: ✅ **IMPLEMENTED** - Dual-level parallelization achieving 22% performance improvement
   - **Inter-file Parallelism**: Multiple source files compiled simultaneously
   - **Intra-file Parallelism**: AST analysis and object compilation run in parallel using `std::async`
   - **Multi-core Scaling**: Linear performance scaling with available CPU cores
   - **Thread Configuration**: Auto-detects `hardware_concurrency()` with configurable thread limits
 
 **Performance Results:**
-- **Single File Compilation**: 120ms → 63ms (**47% improvement**)
+- **Single File Compilation**: 120ms → 93ms (**22% improvement**)
 - **Multi-file Projects**: Linear scaling with number of CPU cores
 - **Zero Breaking Changes**: Full backward compatibility maintained
 
@@ -740,7 +741,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ## Performance Characteristics
 
 ### Compilation Performance ✅ **OPTIMIZED WITH PARALLELIZATION**
-- **Single File (Optimized)**: **~63ms average** (47% improvement from 120ms sequential)
+- **Single File (Optimized)**: **~93ms average** (22% improvement from 120ms sequential)
 - **Dual-Level Parallelism**:
   - **Inter-file**: Multiple source files compiled simultaneously
   - **Intra-file**: AST analysis + object compilation run in parallel using `std::async`
@@ -761,17 +762,18 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ### Runtime Performance
 - **Native Speed**: Compiled code runs at full native performance (no interpretation)
 - **Symbol Resolution**: ~1-10μs per function call through optimized assembly trampolines
-- **Startup Time**: 0.54s (exceeds v2.0 target of <2s ✅ - 73% better than target)
+- **Startup Time**: 0.82s (exceeds v2.0 target of <2s ✅ - 59% better than target)  
 - **Memory Layout**: Standard process memory model with shared library segments
+- **Peak Memory**: ~150MB during complex compilations with includes
 - **Smart Caching**: Automatic detection and reuse of identical command patterns
 
 ### Performance Targets vs. Achieved ✅
 ```
 Metric               Target    Achieved   Status
-Compilation Speed    <100ms    63ms       ✅ 47% better than target
+Compilation Speed    <100ms    93ms       ✅ 7% better than target
 LSP Completion       <100ms    <100ms     ✅ Professional quality
-Startup Time         <2s       0.54s      ✅ 73% better than target
-Memory Usage         <200MB    135MB      ✅ 32% better than target
+Startup Time         <2s       0.82s      ✅ 59% better than target
+Memory Usage         <200MB    150MB      ✅ 25% better than target
 Multi-core Scaling   Linear    Linear     ✅ Scales with CPU cores
 ```
 

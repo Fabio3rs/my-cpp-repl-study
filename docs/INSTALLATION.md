@@ -249,7 +249,7 @@ chmod +x format-code.sh
 
 **Performance Verification:**
 ```bash
-# Should complete in ~63ms average
+# Should complete in ~93ms average
 time echo "int x = 42; #return x" | ./cpprepl -r /dev/stdin
 
 # Memory usage check (should be ~8-12MB)

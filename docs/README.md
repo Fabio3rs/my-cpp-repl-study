@@ -122,7 +122,7 @@ doxygen Doxyfile
 - ✅ **Signal handler mode** (`-s` flag) for crash recovery
 - ✅ **Dynamic library loading** (`#loadprebuilt` command)
 - ✅ **Plugin-style command system** (11+ commands)
-- ✅ **Parallel compilation** (47% performance improvement)
+- ✅ **Parallel compilation** (22% performance improvement)
 - ✅ **Thread-safe architecture** with modern C++ patterns
 
 ### Advanced Features (Implemented)
