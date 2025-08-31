@@ -1,0 +1,26 @@
+// Example batch script for C++ REPL
+// Save as: examples/basic_demo.repl
+// Run with: ./cpprepl -r examples/basic_demo.repl
+
+// Basic variable declarations
+int x = 42;
+int y = 24;
+
+// Function definition
+void greet(const std::string& name) {
+    std::cout << "Hello, " << name << "!\n";
+}
+
+// Call function
+greet("World");
+
+// Evaluate expressions
+#return x + y
+
+// String operations
+std::string message = "C++ REPL";
+#return message.length()
+
+// Vector operations (basic)
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+#return numbers.size()

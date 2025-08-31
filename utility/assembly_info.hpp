@@ -14,19 +14,20 @@
 #include <string>
 #include <unistd.h>
 
+#include "file_raii.hpp"
+
 namespace assembly_info {
 inline std::string executeCommand(const std::string &command) {
     std::ostringstream result;
-    FILE *pipe = popen(command.c_str(), "r");
+    auto pipe = utility::make_popen(command, "r");
     if (!pipe) {
         std::cerr << "Error running command: " << command << std::endl;
         return "";
     }
     char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
         result << buffer;
     }
-    pclose(pipe);
     return result.str();
 }
 

@@ -22,6 +22,9 @@ class ReplTests : public ::testing::Test {
         fs::create_directory(unique_dir);
         fs::current_path(unique_dir);
 
+        std::cout << "Using temporary directory: "
+                  << fs::current_path().string() << std::endl;
+
         // Initialize the REPL
         initRepl();
     }
@@ -75,4 +78,92 @@ TEST_F(ReplTests, StringAssignment) {
 TEST_F(ReplTests, InvalidCommand) {
     std::string_view cmd = "int = ;";
     ASSERT_TRUE(extExecRepl(cmd));
+}
+
+// Test: Invalid command returns false
+TEST_F(ReplTests, OverwriteFunction) {
+    std::string_view cmd = "int foo() { return 123; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int foo() { return 456; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int a = foo();";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(456, std::any_cast<int>(getResultRepl("a")));
+}
+
+TEST_F(ReplTests, FunctionUsingVariable) {
+    std::string_view cmd = "int val = 10; int getVal() { return val; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "int result = getVal();";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(10, std::any_cast<int>(getResultRepl("result")));
+}
+
+TEST_F(ReplTests, AutoIdentifySimpleEvalCode) {
+    std::string_view cmd = "int val = 10;";
+    ASSERT_TRUE(extExecRepl(cmd));
+    cmd = "val += 5;";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(15, std::any_cast<int>(getResultRepl("val")));
+}
+
+TEST_F(ReplTests, DependencyAtConstructorTime) {
+    std::string_view cmd = "int foo() { return 123; }";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int bar() { return foo() + 1; }\n int a = bar();";
+    ASSERT_TRUE(extExecRepl(cmd));
+}
+
+TEST_F(ReplTests, RecursiveFunction) {
+    std::string_view cmd = R"(
+        int factorial(int n) {
+            if (n <= 1) return 1;
+            return n * factorial(n - 1);
+        }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int result = factorial(5);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(120, std::any_cast<int>(getResultRepl("result")));
+}
+
+TEST_F(ReplTests, CodeWithIncludes) {
+    std::string_view cmd = R"(
+        #include <cmath>
+        double calculateHypotenuse(double a, double b) {
+            return std::sqrt(a * a + b * b);
+        }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "double result = calculateHypotenuse(3.0, 4.0);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(5.0, std::any_cast<double>(getResultRepl("result")));
+}
+
+TEST_F(ReplTests, FunctionOverloading) {
+    std::string_view cmd = R"(
+        int multiply(int a, int b) { return a * b; }
+        double multiply(double a, double b) { return a * b; }
+    )";
+    ASSERT_TRUE(extExecRepl(cmd));
+
+    cmd = "int intResult = multiply(3, 4);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(12, std::any_cast<int>(getResultRepl("intResult")));
+
+    cmd = "double doubleResult = multiply(2.5, 4.0);";
+    ASSERT_TRUE(extExecRepl(cmd));
+    ASSERT_EQ(10.0, std::any_cast<double>(getResultRepl("doubleResult")));
+}
+
+TEST_F(ReplTests, IncludesAreWorking) {
+    ASSERT_TRUE(extExecRepl("#include <numeric>"));
+    ASSERT_TRUE(extExecRepl("#include <vector>"));
+
+    ASSERT_TRUE(extExecRepl("std::vector<int> numbers = {1, 2, 3, 4, 5};"));
+    ASSERT_EQ(15, std::any_cast<int>(getResultRepl(
+                      "std::accumulate(numbers.begin(), numbers.end(), 0)")));
 }

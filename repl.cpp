@@ -3,12 +3,20 @@
 #include "backtraced_exceptions.hpp"
 #include "printerOverloads.hpp"
 
+#include "analysis/ast_analyzer.hpp"
+#include "analysis/ast_context.hpp"
+#include "analysis/clang_ast_adapter.hpp"
+#include "compiler/compiler_service.hpp"
+#include "completion/simple_readline_completion.hpp"
+#include "execution/execution_engine.hpp"
+#include "execution/symbol_resolver.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
 #include "utility/assembly_info.hpp"
+#include "utility/file_raii.hpp"
+#include "utility/library_introspection.hpp"
 #include "utility/quote.hpp"
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -20,451 +28,132 @@
 #include <execinfo.h>
 #include <execution>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
-#include <iterator>
 #include <mutex>
-#include <numeric>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include <regex>
 #include <segvcatch.h>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
-std::unordered_set<std::string> linkLibraries;
-std::unordered_set<std::string> includeDirectories;
-std::unordered_set<std::string> preprocessorDefinitions;
+static BuildSettings buildSettings;
+static ReplState replState;
+int verbosityLevel = 0; // Default to quiet mode (errors only)
 
-std::unordered_map<std::string, EvalResult> evalResults;
+// Completion scope para autocompletion
+static std::unique_ptr<completion::SimpleCompletionScope> completionScope;
 
-void addIncludeDirectory(const std::string &dir) {
-    includeDirectories.insert(dir);
-}
-
-auto getLinkLibraries() -> std::unordered_set<std::string> {
-    std::unordered_set<std::string> linkLibraries;
-
-    std::fstream file("linkLibraries.txt", std::ios::in);
-
-    if (file.is_open()) {
-        std::string line;
-        while (std::getline(file, line)) {
-            linkLibraries.insert(line);
+// Callback para merge de variáveis no CompilerService
+static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
+    for (const auto &var : vars) {
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
         }
     }
 
-    return linkLibraries;
-}
-
-auto getLinkLibrariesStr() -> std::string {
-    std::string linkLibrariesStr;
-
-    linkLibrariesStr += " -L./ ";
-
-    for (const auto &lib : linkLibraries) {
-        linkLibrariesStr += " -l" + lib;
+    // Atualizar completion com novo contexto
+    if (completionScope) {
+        completionScope->updateContext(replState);
     }
-
-    return linkLibrariesStr;
 }
 
-auto getIncludeDirectoriesStr() -> std::string {
-    std::string includeDirectoriesStr;
+// Instância global do CompilerService
+static std::unique_ptr<compiler::CompilerService> compilerService;
 
-    for (const auto &dir : includeDirectories) {
-        includeDirectoriesStr += " -I" + dir;
+// Inicializar o CompilerService
+static void initCompilerService() {
+    if (!compilerService) {
+        compilerService = std::make_unique<compiler::CompilerService>(
+            &buildSettings,
+            nullptr, // AstContext será definido quando necessário
+            mergeVarsCallback);
     }
-
-    return includeDirectoriesStr;
 }
 
-auto getPreprocessorDefinitionsStr() -> std::string {
-    std::string preprocessorDefinitionsStr;
+std::any lastReplResult; // used for external commands
 
-    for (const auto &def : preprocessorDefinitions) {
-        preprocessorDefinitionsStr += " -D" + def;
-    }
+// Forward declaration for command handler usage
+bool loadPrebuilt(const std::string &path);
 
-    return preprocessorDefinitionsStr;
+// Forward declaration for functions that still exist
+void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars);
+
+// Forward declaration of adapter
+// Adapter defined below
+
+#include "commands/repl_commands.hpp"
+
+static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
+                                     bool &useCpp2) {
+    repl_commands::ReplCtxView view{
+        .includeDirectories = &bs.includeDirectories,
+        .preprocessorDefinitions = &bs.preprocessorDefinitions,
+        .linkLibraries = &bs.linkLibraries,
+        .useCpp2Ptr = &useCpp2};
+    return repl_commands::handleReplCommand(line, view);
 }
+
+// A classe ClangAstAnalyzerAdapter foi movida para
+// include/analysis/clang_ast_adapter.hpp
 
 int onlyBuildLib(std::string compiler, const std::string &name,
-                 std::string ext = ".cpp", std::string std = "gnu++20") {
-    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+                 std::string ext = ".cpp", std::string std = "gnu++20",
+                 std::string_view extra_args = {}) {
+    initCompilerService();
 
-    if (ext == ".c") {
-        includePrecompiledHeader = "";
+    auto result =
+        compilerService->buildLibraryOnly(compiler, name, ext, std, extra_args);
+
+    if (!result) {
+        std::cerr << std::format("Build failed with error code: {}\n",
+                                 static_cast<int>(result.error));
     }
 
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g "
-               "-Wl,--export-dynamic -fPIC " +
-               name + ext + " " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so";
-
-    return system(cmd.c_str());
+    return result.success() ? result.value : -1;
 }
 
 int buildLibAndDumpAST(std::string compiler, const std::string &name,
                        std::string ext = ".cpp", std::string std = "gnu++20") {
-    std::string includePrecompiledHeader = " -include precompiledheader.hpp";
+    initCompilerService();
 
-    if (ext == ".c") {
-        includePrecompiledHeader = "";
+    auto result =
+        compilerService->buildLibraryWithAST(compiler, name, ext, std);
+
+    if (!result) {
+        std::cerr << std::format("Build with AST failed with error code: {}\n",
+                                 static_cast<int>(result.error));
+        return -1;
     }
 
-    auto cmd = compiler + " -std=" + std + " -shared " +
-               includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-               getPreprocessorDefinitionsStr() +
-               " -g "
-               "-Wl,--export-dynamic -fPIC " +
-               name + ext + " " + getLinkLibrariesStr() +
-               " -o "
-               "lib" +
-               name + ".so";
-    int buildres = system(cmd.c_str());
+    // As variáveis já foram merged via callback, agora só precisamos salvar a
+    // biblioteca de print
+    savePrintAllVarsLibrary(result.value);
 
-    if (buildres != 0) {
-        return buildres;
-    }
-
-    cmd = compiler + " -std=" + std + " -fPIC -Xclang -ast-dump=json " +
-          includePrecompiledHeader + getIncludeDirectoriesStr() + " " +
-          getPreprocessorDefinitionsStr() + " -fsyntax-only " + name + ext +
-          " -o "
-          "lib" +
-          name + ".so > " + name + ".json";
-    return system(cmd.c_str());
+    return 0;
 }
 
-std::string outputHeader;
-std::unordered_set<std::string> includedFiles;
+// Removidas as variáveis globais outputHeader e includedFiles
+// Agora encapsuladas na classe AstContext
 
 static std::mutex varsWriteMutex;
 
-void analyzeInnerAST(
-    std::filesystem::path source, std::vector<VarDecl> &vars,
-    simdjson::simdjson_result<simdjson::ondemand::value> inner) {
-    std::filesystem::path lastfile;
-
-    if (inner.error() != simdjson::SUCCESS) {
-        std::cout << "inner is not an object" << std::endl;
-        return;
-    }
-
-    auto inner_type = inner.type();
-    if (inner_type.error() != simdjson::SUCCESS ||
-        inner_type.value() != simdjson::ondemand::json_type::array) {
-        std::cout << "inner is not an array" << std::endl;
-    }
-
-    auto inner_array = inner.get_array();
-
-    int64_t lastLine = 0;
-    int64_t lastColumn = 0;
-
-    for (auto element : inner_array) {
-        auto loc = element["loc"];
-
-        if (loc.error()) {
-            continue;
-        }
-
-        auto lfile = loc["file"];
-
-        if (!lfile.error()) {
-            simdjson::simdjson_result<std::string_view> lfile_string =
-                lfile.get_string();
-
-            if (!lfile_string.error()) {
-                lastfile = lfile_string.value();
-            }
-        }
-
-        auto includedFrom = loc["includedFrom"];
-
-        if (!includedFrom.error()) {
-            auto includedFrom_string = includedFrom["file"].get_string();
-
-            if (!includedFrom_string.error()) {
-                std::filesystem::path p(lastfile);
-
-                try {
-                    p = std::filesystem::absolute(
-                        std::filesystem::canonical(p));
-                } catch (...) {
-                }
-
-                std::string path = p.string();
-
-                if (!path.empty() && !path.ends_with(".cpp") &&
-                    !path.ends_with(".cc") &&
-                    p.filename() != "decl_amalgama.hpp" &&
-                    p.filename() != "printerOutput.hpp" &&
-                    includedFrom_string.value() == source &&
-                    includedFiles.find(path) == includedFiles.end()) {
-                    includedFiles.insert(path);
-                    outputHeader += "#include \"" + path + "\"\n";
-                }
-            }
-        }
-
-        std::error_code ec;
-        if (!source.empty() && !lastfile.empty() &&
-            !std::filesystem::equivalent(lastfile, source, ec) && !ec) {
-            try {
-                auto canonical = std::filesystem::canonical(lastfile);
-
-                auto current =
-                    std::filesystem::canonical(std::filesystem::current_path());
-
-                if (!canonical.string().starts_with(current.string())) {
-                    continue;
-                }
-            } catch (const std::exception &e) {
-                std::cerr << e.what() << std::endl;
-                continue;
-            } catch (...) {
-                continue;
-            }
-        }
-
-        try {
-            lastColumn = loc["col"].value();
-        } catch (...) {
-            lastColumn = 0; // Default to 0 if column is not available
-        }
-
-        auto lline = loc["line"];
-
-        if (lline.error()) {
-            auto spellingLoc = loc["spellingLoc"];
-
-            if (spellingLoc.error()) {
-                if (lastLine <= 0) {
-                    continue; // Skip if no valid line information
-                }
-            } else {
-                lline = spellingLoc["line"];
-
-                if (lline.error()) {
-                    continue;
-                }
-
-                loc = spellingLoc;
-            }
-        }
-
-        auto lline_int = lline.get_int64();
-
-        if (lline_int.error()) {
-            if (lastLine <= 0) {
-                continue; // Skip if no valid line information
-            }
-
-            // Keep the last line if parsing fails
-        } else {
-            lastLine = lline_int.value();
-        }
-
-        auto kind = element["kind"];
-
-        if (kind.error()) {
-            continue;
-        }
-
-        auto kind_string = kind.get_string();
-
-        if (kind_string.error()) {
-            continue;
-        }
-
-        auto name = element["name"];
-
-        if (name.error()) {
-            continue;
-        }
-
-        auto name_string = name.get_string();
-
-        if (name_string.error()) {
-            continue;
-        }
-
-        if (kind_string.error() == simdjson::SUCCESS &&
-            kind_string.value() == "CXXRecordDecl" &&
-            element["inner"].error() == simdjson::SUCCESS) {
-            assert(element["inner"].type() ==
-                   simdjson::ondemand::json_type::array);
-            analyzeInnerAST(source, vars, element["inner"]);
-            continue;
-        }
-
-        auto type = element["type"];
-
-        if (type.error()) {
-            continue;
-        }
-
-        auto qualType = type["qualType"];
-
-        if (qualType.error()) {
-            continue;
-        }
-
-        auto qualType_string = qualType.get_string();
-
-        if (qualType_string.error()) {
-            continue;
-        }
-
-        auto storageClassJs = element["storageClass"];
-
-        std::string storageClass(
-            storageClassJs.error() ? "" : storageClassJs.get_string().value());
-
-        if (storageClass == "extern" || storageClass == "static") {
-            continue;
-        }
-
-        if (kind_string.value() == "FunctionDecl" ||
-            kind_string.value() == "CXXMethodDecl") {
-            std::scoped_lock<std::mutex> lck(varsWriteMutex);
-
-            if (kind_string.value() != "CXXMethodDecl") {
-                auto qualTypestr = std::string(qualType_string.value());
-
-                auto parem = qualTypestr.find_first_of('(');
-
-                if (parem == std::string::npos) {
-                    continue;
-                }
-
-                qualTypestr.insert(parem, std::string(name_string.value()));
-
-                std::cout << "extern " << qualTypestr << ";" << std::endl;
-
-                outputHeader += "extern " + qualTypestr + ";\n";
-            }
-
-            auto mangledName = element["mangledName"];
-
-            if (mangledName.error()) {
-                continue;
-            }
-
-            VarDecl var;
-
-            var.name = name_string.value();
-            var.type = "";
-            var.qualType = qualType_string.value();
-            var.kind = kind_string.value();
-            var.file = lastfile;
-            var.line = lastLine;
-            var.mangledName = mangledName.get_string().value();
-
-            vars.push_back(std::move(var));
-        } else if (kind_string.value() == "VarDecl") {
-            std::scoped_lock<std::mutex> lck(varsWriteMutex);
-            outputHeader += "#line " + std::to_string(lastLine) + " \"" +
-                            lastfile.string() + "\"\n";
-
-            std::string typenamestr = std::string(qualType_string.value());
-
-            if (auto bracket = typenamestr.find_first_of('[');
-                bracket != std::string::npos) {
-                typenamestr.insert(bracket,
-                                   " " + std::string(name_string.value()));
-            } else {
-                typenamestr += " " + std::string(name_string.value());
-            }
-
-            outputHeader += "extern " + typenamestr + ";\n";
-
-            VarDecl var;
-
-            auto type_var = type["desugaredQualType"];
-
-            var.name = name_string.value();
-            var.type = type_var.error() ? "" : type_var.get_string().value();
-            var.qualType = qualType_string.value();
-            var.kind = kind_string.value();
-            var.file = lastfile;
-            var.line = lastLine;
-
-            vars.push_back(std::move(var));
-        }
-    }
-}
-
-int analyzeASTFromJsonString(simdjson::padded_string_view json,
-                             const std::string &source,
-                             std::vector<VarDecl> &vars) {
-    {
-        std::fstream debugOutput("debug_output.json",
-                                 std::ios::out | std::ios::trunc);
-        debugOutput << json << std::endl;
-    }
-    simdjson::ondemand::parser parser;
-    simdjson::ondemand::document doc;
-    auto error = parser.iterate(json).get(doc);
-    if (error) {
-        std::cout << error << std::endl;
-        return EXIT_FAILURE;
-    }
-    simdjson::ondemand::json_type type;
-    error = doc.type().get(type);
-    if (error) {
-        std::cout << error << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    auto outputHeaderSize = outputHeader.size();
-
-    auto inner = doc["inner"];
-
-    analyzeInnerAST(source, vars, inner);
-
-    if (outputHeaderSize != outputHeader.size()) {
-        std::fstream headerOutput("decl_amalgama.hpp", std::ios::out);
-        headerOutput << outputHeader << std::endl;
-        headerOutput.close();
-    }
-
-    return EXIT_SUCCESS;
-}
-
-int analyzeASTFile(const std::string &filename, const std::string &source,
-                   std::vector<VarDecl> &vars) {
-    simdjson::padded_string json;
-    std::cout << "loading: " << filename << std::endl;
-    auto error = simdjson::padded_string::load(filename).get(json);
-    if (error) {
-        std::cout << "could not load the file " << filename << std::endl;
-        std::cout << "error code: " << error << std::endl;
-        return EXIT_FAILURE;
-    } else {
-        std::cout << "loaded: " << json.size() << " bytes." << std::endl;
-    }
-
-    return analyzeASTFromJsonString(json, source, vars);
-}
+// Funções analyzeInnerAST, analyzeASTFromJsonString e analyzeASTFile
+// foram movidas para analysis::ContextualAstAnalyzer
 
 auto runProgramGetOutput(std::string_view cmd) {
     std::pair<std::string, int> result{{}, -1};
 
-    FILE *pipe = popen(cmd.data(), "r");
+    auto pipe = utility::make_popen(cmd.data(), "r");
 
     if (!pipe) {
         std::cerr << "popen() failed!" << std::endl;
@@ -477,16 +166,16 @@ auto runProgramGetOutput(std::string_view cmd) {
     try {
         buffer.resize(MBPAGE2);
     } catch (const std::bad_alloc &e) {
-        pclose(pipe);
+        pipe.reset();
         std::cerr << "bad_alloc caught: " << e.what() << std::endl;
         return result;
     }
 
     size_t finalSize = 0;
 
-    while (!feof(pipe)) {
+    while (!feof(pipe.get())) {
         size_t read = fread(buffer.data() + finalSize, 1,
-                            buffer.size() - finalSize, pipe);
+                            buffer.size() - finalSize, pipe.get());
 
         if (read < 0) {
             std::cerr << "fread() failed!" << std::endl;
@@ -505,10 +194,11 @@ auto runProgramGetOutput(std::string_view cmd) {
         }
     }
 
-    result.second = pclose(pipe);
+    pipe.reset();
+    result.second = pipe.get_deleter().retcode;
 
     if (result.second != 0) {
-        std::cerr << "program failed! " << result.second << std::endl;
+        std::cerr << std::format("program failed! {}\n", result.second);
     }
 
     buffer.resize(finalSize);
@@ -516,36 +206,24 @@ auto runProgramGetOutput(std::string_view cmd) {
     return result;
 }
 
-int build_precompiledheader(std::string compiler = "clang++") {
-    std::fstream precompHeader("precompiledheader.hpp",
-                               std::ios::out | std::ios::trunc);
+int build_precompiledheader(
+    std::string compiler = "clang++",
+    std::shared_ptr<analysis::AstContext> context = nullptr) {
+    initCompilerService();
 
-    precompHeader << "#pragma once\n\n" << std::endl;
-    precompHeader << "#include <any>\n" << std::endl;
-    precompHeader << "extern int (*bootstrapProgram)(int argc, char "
-                     "**argv);\n";
-    precompHeader << "extern std::any lastReplResult;\n";
-    precompHeader << "#include \"printerOutput.hpp\"\n\n" << std::endl;
+    auto result = compilerService->buildPrecompiledHeader(compiler, context);
 
-    for (const auto &include : includedFiles) {
-        if (std::filesystem::exists(include)) {
-            precompHeader << "#include \"" << include << "\"\n";
-        } else {
-            precompHeader << "#include <" << include << ">\n";
-        }
+    if (!result) {
+        std::cerr << std::format(
+            "Precompiled header build failed with error code: {}\n",
+            static_cast<int>(result.error));
+        return -1;
     }
 
-    precompHeader.flush();
-    precompHeader.close();
-
-    std::string cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-                      getIncludeDirectoriesStr() +
-                      " -fPIC -x c++-header -std=gnu++20 -o "
-                      "precompiledheader.hpp.pch precompiledheader.hpp";
-    return system(cmd.c_str());
+    return 0;
 }
 
-std::unordered_map<std::string, void (*)()> varPrinterAddresses;
+// moved into replState
 
 void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     if (vars.empty()) {
@@ -553,9 +231,10 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     }
 
     static int i = 0;
-    std::string name = "printerOutput" + std::to_string(i++);
+    std::string name = std::format("printerOutput{}", i++);
 
-    std::fstream printerOutput(name + ".cpp", std::ios::out | std::ios::trunc);
+    std::fstream printerOutput(std::format("{}.cpp", name),
+                               std::ios::out | std::ios::trunc);
 
     printerOutput << "#include \"printerOutput.hpp\"\n\n" << std::endl;
     printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
@@ -565,10 +244,10 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
         /*std::cout << var.qualType << "   " << var.type << "   " << var.name
                   << std::endl;*/
         if (var.kind == "VarDecl") {
-            printerOutput << "extern \"C\" void printvar_" << var.name
-                          << "() {\n";
-            printerOutput << "  printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("extern \"C\" void printvar_{}() {{\n",
+                                         var.name);
+            printerOutput << std::format("  printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
             printerOutput << "}\n";
         }
     }
@@ -578,8 +257,8 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
         }
     }
 
@@ -590,30 +269,31 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
     int buildLibRes = onlyBuildLib("clang++", name);
 
     if (buildLibRes != 0) {
-        std::cerr << "buildLibRes != 0: " << name << std::endl;
+        std::cerr << std::format("buildLibRes != 0: {}\n", name);
         return;
     }
 
     void *handlep =
-        dlopen(("./lib" + name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
+        dlopen(std::format("./lib{}.so", name).c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (!handlep) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
+        std::cerr << std::format("Cannot open library: {}\n", dlerror());
         return;
     }
 
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            void (*printvar)() =
-                (void (*)())dlsym(handlep, ("printvar_" + var.name).c_str());
+            void (*printvar)() = (void (*)())dlsym(
+                handlep, std::format("printvar_{}", var.name).c_str());
             if (!printvar) {
-                std::cerr << "Cannot load symbol 'printvar_" << var.name
-                          << "': " << dlerror() << '\n';
+                std::cerr << std::format(
+                    "Cannot load symbol 'printvar_{}': {}\n", var.name,
+                    dlerror());
                 dlclose(handlep);
                 return;
             }
 
-            varPrinterAddresses[var.name] = printvar;
+            replState.varPrinterAddresses[var.name] = printvar;
         }
     }
 }
@@ -634,8 +314,8 @@ void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
         // std::cout << __LINE__ << var.kind << std::endl;
         if (var.kind == "VarDecl") {
-            printerOutput << "printdata(" << var.name << ", \"" << var.name
-                          << "\", \"" + var.qualType + "\");\n";
+            printerOutput << std::format("printdata({}, \"{}\", \"{}\");\n",
+                                         var.name, var.name, var.qualType);
         }
     }
 
@@ -651,96 +331,19 @@ struct wrapperFn {
     void **wrap_ptrfn;
 };
 
-std::unordered_set<std::string> varsNames;
-std::unordered_map<std::string, wrapperFn> fnNames;
-std::vector<VarDecl> allTheVariables;
-
-auto buildASTWithPrintVarsFn(std::string compiler, const std::string &name)
-    -> std::vector<VarDecl> {
-    auto cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-               getIncludeDirectoriesStr() +
-               " -std=gnu++20 -fPIC -Xclang -ast-dump=json -include "
-               "precompiledheader.hpp -fsyntax-only " +
-               name + ".cpp -o lib" + name + ".so > " + name + ".json";
-
-    std::cout << cmd << std::endl;
-    int analyzeres = system(cmd.c_str());
-
-    if (analyzeres != 0) {
-        std::cerr << "analyzeres != 0: " << cmd << std::endl;
-        return {};
-    }
-
-    std::vector<VarDecl> vars;
-
-    analyzeASTFile(name + ".json", name + ".cpp", vars);
-
-    cmd = compiler + getPreprocessorDefinitionsStr() + " " +
-          getIncludeDirectoriesStr() +
-          " -std=gnu++20 -shared -include precompiledheader.hpp -g "
-          "-Wl,--export-dynamic -fPIC " +
-          name + ".cpp " + getLinkLibrariesStr() +
-          " -o "
-          "lib" +
-          name + ".so";
-    std::cout << cmd << std::endl;
-    int buildres = system(cmd.c_str());
-
-    if (buildres != 0) {
-        std::cerr << "buildres != 0: " << cmd << std::endl;
-        return {};
-    }
-
-    savePrintAllVarsLibrary(vars);
-
-    // merge todasVars with vars
-    for (const auto &var : vars) {
-        if (varsNames.find(var.name) == varsNames.end()) {
-            varsNames.insert(var.name);
-            allTheVariables.push_back(var);
-        }
-    }
-
-    return vars;
-}
-
-auto concatNames(const std::vector<std::string> &names) -> std::string {
-    std::string concat;
-
-    size_t size = 0;
-
-    for (const auto &name : names) {
-        size += name.size() + 1;
-    }
-
-    concat.reserve(size);
-
-    for (const auto &name : names) {
-        concat += name;
-        concat += " ";
-    }
-
-    return concat;
-}
-
-void dumpCppIncludeTargetWrapper(const std::basic_string<char> &name,
-                                 const std::string &wrappedname) {
-    std::fstream replOutput(wrappedname, std::ios::out | std::ios::trunc);
-
-    replOutput << "#include \"precompiledheader.hpp\"\n\n";
-    replOutput << "#include \"decl_amalgama.hpp\"\n\n";
-
-    replOutput << "#include \"" << name << "\"" << std::endl;
-
-    replOutput.close();
-}
+// MOVED: fnNames moved to execution::GlobalExecutionState
 
 void mergeVars(const std::vector<VarDecl> &vars) {
     for (const auto &var : vars) {
-        if (varsNames.find(var.name) == varsNames.end()) {
-            varsNames.insert(var.name);
-            allTheVariables.push_back(var);
+        if (replState.varsNames.find(var.name) == replState.varsNames.end()) {
+            replState.varsNames.insert(var.name);
+            replState.allTheVariables.push_back(var);
         }
+    }
+
+    // Atualizar completion
+    if (completionScope) {
+        completionScope->updateContext(replState);
     }
 }
 
@@ -749,66 +352,81 @@ auto analyzeCustomCommands(
     -> std::pair<std::vector<VarDecl>, int> {
     std::pair<std::vector<VarDecl>, int> resultc;
 
-    std::for_each(
-        std::execution::par_unseq, commands.begin(), commands.end(),
-        [&](const auto &namecmd) {
-            if (namecmd.first.empty()) {
-                return;
-            }
-            const auto path = std::filesystem::path(namecmd.first);
-            std::string purefilename = path.filename().string();
+    // Garante que o CompilerService está inicializado
+    initCompilerService();
 
-            purefilename =
-                purefilename.substr(0, purefilename.find_last_of('.'));
+    // Converte o mapa de comandos para um vetor de comandos formatados
+    std::vector<std::string> formattedCommands;
 
-            std::string logname = purefilename + ".log";
-            std::string cmd = namecmd.second;
+    for (const auto &namecmd : commands) {
+        if (namecmd.first.empty()) {
+            continue;
+        }
 
-            if ((namecmd.second.find("-std=gnu++20") != std::string::npos ||
-                 namecmd.second.find("-std=") == std::string::npos) &&
-                namecmd.second.find("-fvisibility=hidden") ==
-                    std::string::npos) {
-                cmd += " -std=gnu++20 -include "
-                       "precompiledheader.hpp";
-            }
+        const auto path = std::filesystem::path(namecmd.first);
+        std::string purefilename = path.filename().string();
+        purefilename = purefilename.substr(0, purefilename.find_last_of('.'));
 
-            cmd += " -Xclang -ast-dump=json  -fsyntax-only "
-                   " 2>" +
-                   logname;
+        std::string logname = std::format("{}.log", purefilename);
+        std::string cmd = namecmd.second;
 
-            auto out = runProgramGetOutput(cmd);
+        // Adiciona flags padrão se necessário
+        if ((namecmd.second.find("-std=gnu++20") != std::string::npos ||
+             namecmd.second.find("-std=") == std::string::npos) &&
+            namecmd.second.find("-fvisibility=hidden") == std::string::npos) {
+            cmd += " -std=gnu++20 -include precompiledheader.hpp";
+        }
 
-            if (out.second != 0) {
-                std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
-                          << " " << cmd << std::endl;
-                std::fstream file(logname, std::ios::in);
+        // Adiciona flags para análise AST e redirecionamento para JSON
+        std::string jsonFile = std::format("{}_ast.json", purefilename);
+        cmd += " -Xclang -ast-dump=json -fsyntax-only";
+        cmd += std::format(" 2>{} > {}", logname, jsonFile);
 
-                std::copy(std::istreambuf_iterator<char>(file),
-                          std::istreambuf_iterator<char>(),
-                          std::ostreambuf_iterator<char>(std::cerr));
-                resultc.second = out.second;
-                return;
-            }
+        formattedCommands.push_back(cmd);
+    }
 
-            simdjson::padded_string_view json(out.first);
-            analyzeASTFromJsonString(json, namecmd.first, resultc.first);
-        });
+    // Usa o CompilerService para analisar os comandos
+    auto result = compilerService->analyzeCustomCommands(formattedCommands);
 
+    if (!result.success()) {
+        std::cerr << "Erro na análise customizada usando CompilerService"
+                  << std::endl;
+        resultc.second = 1;
+        return resultc;
+    }
+
+    // Converte as strings encontradas em VarDecls
+    // (Nota: As variáveis já foram mescladas pelo callback mergeVars)
+    // Aqui só precisamos definir o código de retorno
+    resultc.second = 0;
+
+    // Como o callback já foi chamado, as variáveis já estão em
+    // replState.allTheVariables Mas vamos retornar as que foram encontradas
+    // nesta análise específica
+    std::vector<VarDecl> foundVars;
+    for (const auto &varName : result.value) {
+        VarDecl decl;
+        decl.name = varName;
+        decl.type = "auto"; // Tipo genérico
+        foundVars.push_back(decl);
+    }
+
+    resultc.first = std::move(foundVars);
     return resultc;
 }
 
 auto linkAllObjects(const std::vector<std::string> &objects,
                     const std::string &libname) -> int {
-    std::string linkLibraries = getLinkLibrariesStr();
+    initCompilerService();
 
-    std::string namesConcated = concatNames(objects);
+    auto result = compilerService->linkObjects(objects, libname);
 
-    std::string cmd;
+    if (!result) {
+        std::cerr << std::format("Linking failed with error code: {}\n",
+                                 static_cast<int>(result.error));
+    }
 
-    cmd = "clang++ -shared -g -WL,--export-dynamic " + namesConcated + " " +
-          linkLibraries + " -o lib" + libname + ".so";
-    std::cout << cmd << std::endl;
-    return system(cmd.c_str());
+    return result.success() ? result.value : -1;
 }
 
 auto buildLibAndDumpASTWithoutPrint(std::string compiler,
@@ -816,141 +434,33 @@ auto buildLibAndDumpASTWithoutPrint(std::string compiler,
                                     const std::vector<std::string> &names,
                                     const std::string &std)
     -> std::pair<std::vector<VarDecl>, int> {
-    std::pair<std::vector<VarDecl>, int> resultc;
+    initCompilerService();
 
-    std::string includes = getIncludeDirectoriesStr();
-    std::string preprocessorDefinitions = getPreprocessorDefinitionsStr();
+    auto result = compilerService->buildMultipleSourcesWithAST(
+        compiler, libname, names, std);
 
-    auto now = std::chrono::system_clock::now();
-
-    std::string namesConcated;
-
-    namesConcated.reserve(std::accumulate(
-        names.begin(), names.end(), 0,
-        [](size_t acc, const auto &name) { return acc + name.size() + 1; }));
-
-    std::mutex namesConcatedMutex;
-
-    std::for_each(
-        std::execution::par_unseq, names.begin(), names.end(),
-        [&](const auto &name) {
-            if (name.empty()) {
-                return;
-            }
-
-            const auto path = std::filesystem::path(name);
-            std::string purefilename = path.filename().string();
-
-            purefilename =
-                purefilename.substr(0, purefilename.find_last_of('.'));
-
-            std::thread analyzeThr([&]() {
-                std::string logname = purefilename + ".log";
-                std::string cmd =
-                    compiler + preprocessorDefinitions + " " + includes +
-                    " -std=" + std +
-                    " -fPIC -Xclang -ast-dump=json "
-                    " -Xclang -include-pch -Xclang precompiledheader.hpp.pch "
-                    "-include precompiledheader.hpp -fsyntax-only " +
-                    name + " -o lib" + purefilename + "_blank.so 2>" + logname;
-
-                auto out = runProgramGetOutput(cmd);
-
-                if (out.second != 0) {
-                    std::cerr << "runProgramGetOutput(cmd) != 0: " << out.second
-                              << " " << cmd << std::endl;
-                    std::fstream file(logname, std::ios::in);
-
-                    std::copy(std::istreambuf_iterator<char>(file),
-                              std::istreambuf_iterator<char>(),
-                              std::ostreambuf_iterator<char>(std::cerr));
-                    resultc.second = out.second;
-                    return;
-                }
-
-                simdjson::padded_string_view json(out.first);
-                analyzeASTFromJsonString(json, name, resultc.first);
-            });
-
-            try {
-                std::string object = purefilename + ".o";
-
-                {
-                    std::scoped_lock<std::mutex> lck(namesConcatedMutex);
-                    namesConcated += object + " ";
-                }
-
-                std::string cmd =
-                    compiler + preprocessorDefinitions + " " + includes +
-                    " -std=gnu++20 -fPIC  -c -Xclang "
-                    "-include-pch -Xclang precompiledheader.hpp.pch "
-                    "-include precompiledheader.hpp "
-                    "-g -fPIC " +
-                    name + " -o " + object;
-
-                int buildres = system(cmd.c_str());
-
-                if (buildres != 0) {
-                    resultc.second = buildres;
-                    std::cerr << "buildres != 0: " << cmd << std::endl;
-                    std::cout << name << std::endl;
-                }
-            } catch (const std::exception &e) {
-                std::cerr << e.what() << std::endl;
-                resultc.second = -1;
-            }
-
-            if (analyzeThr.joinable()) {
-                analyzeThr.join();
-            }
-        });
-
-    if (resultc.second != 0) {
-        return resultc;
+    if (!result) {
+        std::cerr << std::format(
+            "Build multiple sources failed with error code: {}\n",
+            static_cast<int>(result.error));
+        return {{}, -1};
     }
 
-    auto end = std::chrono::system_clock::now();
-
-    std::cout << "Analyze and compile time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       now)
-                     .count()
-              << "ms\n";
-
-    std::string linkLibraries = getLinkLibrariesStr();
-
-    std::string cmd;
-
-    cmd = compiler +
-          " -shared -g "
-          "-WL,--export-dynamic " +
-          namesConcated + " " + getLinkLibrariesStr() +
-          " -o "
-          "lib" +
-          libname + ".so";
-    std::cout << cmd << std::endl;
-    int linkRes = system(cmd.c_str());
-
-    if (linkRes != 0) {
-        std::cerr << "linkRes != 0: " << cmd << std::endl;
-        return resultc;
-    }
-
-    mergeVars(resultc.first);
-
-    return resultc;
+    // As variáveis já foram merged via callback
+    return {result.value.variables, result.value.returnCode};
 }
 
 int runPrintAll() {
     void *handlep = dlopen("./libprinterOutput.so", RTLD_NOW | RTLD_GLOBAL);
     if (!handlep) {
-        std::cerr << "Cannot open library: " << dlerror() << '\n';
+        std::cerr << std::format("Cannot open library: {}\n", dlerror());
         return EXIT_FAILURE;
     }
 
     void (*printall)() = (void (*)())dlsym(handlep, "_Z8printallv");
     if (!printall) {
-        std::cerr << "Cannot load symbol 'printall': " << dlerror() << '\n';
+        std::cerr << std::format("Cannot load symbol 'printall': {}\n",
+                                 dlerror());
         dlclose(handlep);
         return EXIT_FAILURE;
     }
@@ -964,402 +474,48 @@ int runPrintAll() {
 
 #define MAX_LINE_LENGTH 1024
 
-auto get_library_start_address(const char *library_name) -> uintptr_t {
-    std::string line(MAX_LINE_LENGTH, 0);
-    std::string library_path(MAX_LINE_LENGTH, 0);
-    uintptr_t start_address{}, end_address{};
-
-    // Open /proc/self/maps
-    FILE *maps_file = fopen("/proc/self/maps", "r");
-    if (maps_file == NULL) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Search for the library in memory maps
-    while (fgets(line.data(), MAX_LINE_LENGTH, maps_file) != NULL) {
-        library_path.front() = 0;
-        line.back() = 0;
-        line[strcspn(line.data(), "\n")] = 0;
-        std::cout << strlen(line.c_str()) << "   \"" << line << '"'
-                  << std::endl;
-        try {
-            sscanf(line.c_str(), "%zx-%zx %*s %*s %*s %*s %1023s",
-                   &start_address, &end_address, library_path.data());
-            std::error_code ec;
-            if (std::filesystem::equivalent(library_path, library_name, ec) &&
-                !ec) {
-                break;
-            }
-        } catch (...) {
-        }
-    }
-
-    if (library_path.front() == 0) {
-        printf("Library %s not found in memory maps.\n", library_name);
-        return 0;
-    }
-
-    fclose(maps_file);
-
-    return start_address;
-}
-
-auto get_symbol_address(const char *library_name, const char *symbol_name)
-    -> uintptr_t {
-    FILE *maps_file{};
-    char line[MAX_LINE_LENGTH]{};
-    char library_path[MAX_LINE_LENGTH]{};
-    uintptr_t start_address{}, end_address{};
-    char command[MAX_LINE_LENGTH]{};
-    uintptr_t symbol_offset = 0;
-
-    // Open /proc/self/maps
-    maps_file = fopen("/proc/self/maps", "r");
-    if (maps_file == NULL) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Search for the library in memory maps
-    while (fgets(line, MAX_LINE_LENGTH, maps_file) != NULL) {
-        *library_path = 0;
-        int readed = sscanf(line, "%zx-%zx %*s %*s %*s %*s %s", &start_address,
-                            &end_address, library_path);
-        std::cout << readed << "   " << library_path << "   " << library_name
-                  << std::endl;
-        if (strnlen(library_path, std::size(library_path)) == 0) {
-            continue;
-        }
-
-        if (std::filesystem::equivalent(library_path, library_name)) {
-            // Get the base address of the library
-            break;
-        }
-    }
-
-    if (strlen(library_path) == 0) {
-        printf("Library %s not found in memory maps.\n", library_name);
-        return 0;
-    }
-
-    // Get the address of the symbol within the library using nm
-    sprintf(command, "nm -D --defined-only %s | grep ' %s$'", library_path,
-            symbol_name);
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parse the output of nm command to get the symbol address
-    if (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL) {
-        char address[17]; // Assuming address length of 16 characters
-        sscanf(line, "%16s", address);
-        sscanf(address, "%zx",
-               &symbol_offset); // Convert hex string to unsigned long
-        printf("Address of symbol %s in %s: 0x%zx\n", symbol_name, library_name,
-               start_address + symbol_offset);
-    } else {
-        printf("Symbol %s not found in %s.\n", symbol_name, library_name);
-    }
-
-    pclose(symbol_address_command);
-
-    fclose(maps_file);
-
-    return start_address + symbol_offset;
-}
-
 /*
  * Added to [try to] solve the problem of the function not being loaded when the
  * library initializes
  */
-std::string lastLibrary;
-std::unordered_map<std::string, uintptr_t> symbolsToResolve;
-
-extern "C" void loadfnToPtr(void **ptr, const char *name) {
-    /*
-     * Function related to loadFn_"funcion name", this function is called when
-     * the library constructor tries to run and the function is not loaded yet.
-     */
-    std::cout << __LINE__ << ": Function segfaulted: " << name
-              << "   library: " << lastLibrary << std::endl;
-
-    /*
-     * TODO: Test again with dlopen RTLD_NOLOAD and dlsym
-     */
-    auto base = get_library_start_address(lastLibrary.c_str());
-
-    if (base == 0) {
-        std::cerr << __LINE__ << ": base == 0" << lastLibrary << std::endl;
-
-        auto handle = dlopen(lastLibrary.c_str(), RTLD_NOLOAD);
-
-        if (handle == nullptr) {
-            std::cerr << __LINE__ << ": handle == nullptr" << lastLibrary
-                      << std::endl;
-            return;
-        }
-
-        for (const auto &[symbol, offset] : symbolsToResolve) {
-            void **wrap_ptrfn =
-                (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
-
-            if (wrap_ptrfn == nullptr) {
-                continue;
-            }
-
-            auto tmp = dlsym(handle, symbol.c_str());
-
-            if (tmp == nullptr) {
-                std::cerr << __LINE__ << ": tmp == nullptr" << lastLibrary
-                          << std::endl;
-                continue;
-            }
-
-            *wrap_ptrfn = tmp;
-        }
-
-        if (*ptr == nullptr) {
-            *ptr = dlsym(handle, name);
-        }
-        return;
-    }
-
-    for (const auto &[symbol, offset] : symbolsToResolve) {
-        void **wrap_ptrfn =
-            (void **)dlsym(RTLD_DEFAULT, (symbol + "_ptr").c_str());
-
-        if (wrap_ptrfn == nullptr) {
-            continue;
-        }
-
-        *wrap_ptrfn = reinterpret_cast<void *>(base + offset);
-    }
-}
+// MOVED: lastLibrary and symbolsToResolve moved to
+// execution::GlobalExecutionState
 
 void prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     std::unordered_map<std::string, std::string> &functions) {
-    std::string wrapper;
 
-    // wrapper += "#include \"decl_amalgama.hpp\"\n\n";
+    // Obter funções existentes do execution state
+    std::unordered_set<std::string> existingFunctions;
+    auto &state = execution::getGlobalExecutionState();
+    // TODO: Implementar método para obter funções existentes do state
 
-    std::unordered_set<std::string> addedFns;
+    // Usar a configuração global persistente
+    auto &config = state.getWrapperConfig();
 
-    for (const auto &fnvars : vars) {
-        std::cout << fnvars.name << std::endl;
-        if (fnvars.kind != "FunctionDecl" && fnvars.kind != "CXXMethodDecl") {
-            continue;
-        }
-
-        if (fnvars.mangledName == "main") {
-            continue;
-        }
-
-        if (addedFns.contains(fnvars.mangledName)) {
-            continue;
-        }
-
-        if (!fnNames.contains(fnvars.mangledName)) {
-            addedFns.insert(fnvars.mangledName);
-            auto qualTypestr = std::string(fnvars.qualType);
-            auto parem = qualTypestr.find_first_of('(');
-
-            // if (parem == std::string::npos || fnvars.kind != "FunctionDecl")
-            // {
-            qualTypestr = "extern \"C\" void __attribute__ ((naked)) " +
-                          fnvars.mangledName + "()";
-            /*} else {
-                qualTypestr.insert(parem,
-                                   std::string(" __attribute__ ((naked)) " +
-                                               fnvars.mangledName));
-                qualTypestr.insert(0, "extern \"C\" ");
-            }*/
-
-            /*
-             * This is the function that will be called when the library
-             * initializes and the functions are not ready yet, it will try to
-             * load the function address and set it to the pointer
-             */
-            wrapper += "static void __attribute__((naked)) loadFn_" +
-                       fnvars.mangledName + "();\n";
-
-            wrapper += "extern \"C\" void *" + fnvars.mangledName +
-                       "_ptr = reinterpret_cast<void*>(loadFn_" +
-                       fnvars.mangledName + ");\n\n";
-            wrapper += qualTypestr + " {\n";
-            wrapper += R"(    __asm__ __volatile__ (
-        "jmp *%0\n"
-        :
-        : "r" ()" + fnvars.mangledName +
-                       R"(_ptr)
-    );
-}
-)";
-
-            wrapper += "static void __attribute__((naked)) loadFn_" +
-                       fnvars.mangledName + "() {\n";
-
-            /*
-             * Observations: Keep the stack aligned in 16 bytes before calling a
-             * function
-             */
-            wrapper += R"(
-    __asm__(
-        // Save all general-purpose registers
-        "pushq   %rax                \n"
-        "pushq   %rbx                \n"
-        "pushq   %rcx                \n"
-        "pushq   %rdx                \n"
-        "pushq   %rsi                \n"
-        "pushq   %rdi                \n"
-        "pushq   %rbp                \n"
-        "pushq   %r8                 \n"
-        "pushq   %r9                 \n"
-        "pushq   %r10                \n"
-        "pushq   %r11                \n"
-        "pushq   %r12                \n"
-        "pushq   %r13                \n"
-        "pushq   %r14                \n"
-        "pushq   %r15                \n"
-        "movq    %rsp, %rbp          \n" // Set Base Pointer
-    );
-        // Push parameters onto the stack
-        //"leaq    _Z21qRegisterResourceDataiPKhS0_S0__ptr(%rip), %rax  \n" // Address of pointer
-    __asm__ __volatile__ (
-        "movq %0, %%rax"
-        :
-        : "r" (&)" + fnvars.mangledName +
-                       R"(_ptr)
-    );
-
-    __asm__(
-        // Push parameters onto the stack
-        //"leaq    )" + fnvars.mangledName +
-                       R"(_ptr(%rip), %rax  \n" // Address
-                                                                          // of
-                                                                          // pointer
-        "movq    %rax, %rdi          \n" // Parameter 1: pointer address
-        "leaq    .LC)" +
-                       fnvars.mangledName +
-                       R"((%rip), %rsi    \n" // Address of string "a"
-
-        // Call loadfnToPtr function
-        "call    loadfnToPtr  \n" // Call loadfnToPtr function
-
-        // Restore all general-purpose registers
-        "popq    %r15                \n"
-        "popq    %r14                \n"
-        "popq    %r13                \n"
-        "popq    %r12                \n"
-        "popq    %r11                \n"
-        "popq    %r10                \n"
-        "popq    %r9                 \n"
-        "popq    %r8                 \n"
-        "popq    %rbp                \n"
-        "popq    %rdi                \n"
-        "popq    %rsi                \n"
-        "popq    %rdx                \n"
-        "popq    %rcx                \n"
-        "popq    %rbx                \n"
-        "popq    %rax                \n");
-    __asm__ __volatile__("jmp *%0\n"
-                         :
-                         : "r"()" +
-                       fnvars.mangledName +
-                       R"(_ptr));
-
-
-    __asm__(".section .rodata            \n"
-            ".LC)" + fnvars.mangledName +
-                       R"(:                        \n"
-            ".string \")" +
-                       fnvars.mangledName +
-                       R"(\"                \n");
-    __asm__(".section .text            \n");
-}
-            )";
-        }
-
-        functions[fnvars.mangledName] = fnvars.name;
-    }
-
-    if (!functions.empty()) {
-        auto wrappername = "wrapper_" + name;
-        std::fstream wrapperOutput(wrappername + ".cpp",
-                                   std::ios::out | std::ios::trunc);
-        wrapperOutput << wrapper << std::endl;
-        wrapperOutput.close();
-
-        onlyBuildLib("clang++", wrappername);
-    }
+    functions = execution::SymbolResolver::prepareFunctionWrapper(
+        name, vars, config, existingFunctions);
 }
 
 void fillWrapperPtrs(
     const std::unordered_map<std::string, std::string> &functions,
     void *handlewp, void *handle) {
-    for (const auto &[mangledName, fns] : functions) {
-        void *fnptr = dlsym(handle, mangledName.c_str());
-        if (!fnptr) {
-            void **wrap_ptrfn =
-                (void **)dlsym(handlewp, (fns + "_ptr").c_str());
 
-            if (!wrap_ptrfn) {
-                continue;
-            }
+    // Usar a configuração global persistente
+    auto &config = execution::getGlobalExecutionState().getWrapperConfig();
 
-            if (!fnNames.contains(mangledName)) {
-                continue;
-            }
-
-            auto &fn = fnNames[mangledName];
-            fn.fnptr = nullptr;
-            fn.wrap_ptrfn = wrap_ptrfn;
-            continue;
-        }
-
-        if (fnNames.contains(mangledName)) {
-            auto it = fnNames.find(mangledName);
-            it->second.fnptr = fnptr;
-
-            void **wrap_ptrfn = it->second.wrap_ptrfn;
-
-            if (wrap_ptrfn) {
-                *wrap_ptrfn = fnptr;
-            }
-            continue;
-        }
-
-        auto &fn = fnNames[mangledName];
-
-        fn.fnptr = fnptr;
-
-        void **wrap_ptrfn =
-            (void **)dlsym(handlewp, (mangledName + "_ptr").c_str());
-
-        if (!wrap_ptrfn) {
-            std::cerr << "Cannot load symbol '" << mangledName
-                      << "_ptr': " << dlerror() << '\n';
-            continue;
-        }
-
-        *wrap_ptrfn = fnptr;
-        fn.wrap_ptrfn = wrap_ptrfn;
-    }
+    execution::SymbolResolver::fillWrapperPtrs(functions, handlewp, handle,
+                                               config);
 }
 
-std::any lastReplResult;
-std::vector<std::function<bool()>> lazyEvalFns;
-bool shouldRecompilePrecompiledHeader = false;
+// moved into replState
 
 void evalEverything() {
-    for (const auto &fn : lazyEvalFns) {
+    for (const auto &fn : replState.lazyEvalFns) {
         fn();
     }
 
-    lazyEvalFns.clear();
+    replState.lazyEvalFns.clear();
 }
 
 void resolveSymbolOffsetsFromLibraryFile(
@@ -1368,56 +524,15 @@ void resolveSymbolOffsetsFromLibraryFile(
         return;
     }
 
-    char command[1024]{};
-    sprintf(command, "nm -D --defined-only %s", lastLibrary.c_str());
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
-        perror("popen");
-        exit(EXIT_FAILURE);
+    auto libraryPath = execution::getGlobalExecutionState().getLastLibrary();
+    auto symbolOffsets =
+        execution::SymbolResolver::resolveSymbolOffsetsFromLibraryFile(
+            functions, libraryPath);
+
+    // Adicionar offsets ao execution state
+    for (const auto &[symbol, offset] : symbolOffsets) {
+        execution::getGlobalExecutionState().addSymbolToResolve(symbol, offset);
     }
-
-    char line[1024]{};
-
-    while (fgets(line, 1024, symbol_address_command) != NULL) {
-        uintptr_t symbol_offset = 0;
-        char symbol_name[256];
-        sscanf(line, "%zx %*s %255s", &symbol_offset, symbol_name);
-
-        if (functions.contains(symbol_name)) {
-            symbolsToResolve[symbol_name] = symbol_offset;
-        }
-    }
-
-    pclose(symbol_address_command);
-}
-
-auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
-    std::vector<VarDecl> vars;
-    char command[2048]{}, line[MAX_LINE_LENGTH]{};
-
-    // Get the address of the symbol within the library using nm
-    snprintf(command, std::size(command), "nm %s | grep ' T '", path.c_str());
-    FILE *symbol_address_command = popen(command, "r");
-    if (symbol_address_command == NULL) {
-        perror("popen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Parse the output of nm command to get the symbol address
-    while (fgets(line, MAX_LINE_LENGTH, symbol_address_command) != NULL &&
-           !std::feof(symbol_address_command)) {
-        char address[32]{};
-        char symbol_location[256]{};
-        char symbol_name[512]{};
-        sscanf(line, "%16s %s %s", address, symbol_location, symbol_name);
-        vars.push_back({.name = symbol_name,
-                        .mangledName = symbol_name,
-                        .kind = "FunctionDecl"});
-    }
-
-    pclose(symbol_address_command);
-
-    return vars;
 }
 
 auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
@@ -1429,11 +544,12 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     void *handlewp = nullptr;
 
     if (!functions.empty()) {
-        handlewp = dlopen(("./libwrapper_" + cfg.repl_name + ".so").c_str(),
-                          RTLD_NOW | RTLD_GLOBAL);
+        handlewp =
+            dlopen(std::format("./libwrapper_{}.so", cfg.repl_name).c_str(),
+                   RTLD_NOW | RTLD_GLOBAL);
 
         if (!handlewp) {
-            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            std::cerr << std::format("Cannot wrapper library: {}\n", dlerror());
             // return false;
         }
     }
@@ -1447,14 +563,18 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     auto load_start = std::chrono::steady_clock::now();
 
-    lastLibrary = ("./lib" + cfg.repl_name + ".so");
+    auto libraryPath = std::format("./lib{}.so", cfg.repl_name);
+    execution::getGlobalExecutionState().setLastLibrary(libraryPath);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
-    EvalResult result;
-    result.libpath = lastLibrary;
+    // Inicializar configuração global para trampolines
+    execution::getGlobalExecutionState().initializeWrapperConfig();
 
-    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    EvalResult result;
+    result.libpath = libraryPath;
+
+    void *handle = dlopen(libraryPath.c_str(), dlOpenFlags);
     result.handle = handle;
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
@@ -1463,7 +583,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
         return result;
     }
 
-    symbolsToResolve.clear();
+    execution::getGlobalExecutionState().clearSymbolsToResolve();
 
     auto load_end = std::chrono::steady_clock::now();
 
@@ -1495,30 +615,27 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
                 if (btrace != nullptr && size > 0) {
                     std::cerr
-                        << "Backtrace (based on callstack return address): "
-                        << std::endl;
-
+                        << "Backtrace (based on callstack return address):\n";
                     backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
-                    std::cerr << "Backtrace not available" << std::endl;
+                    std::cerr << "Backtrace not available\n";
                 }
             } catch (const std::exception &e) {
-                std::cerr << "C++ exception on exec/eval: " << e.what()
-                          << std::endl;
+                std::cerr << std::format("C++ exception on exec/eval: {}\n",
+                                         e.what());
 
                 auto [btrace, size] =
                     backtraced_exceptions::get_backtrace_for(e);
 
                 if (btrace != nullptr && size > 0) {
                     std::cerr
-                        << "Backtrace (based on callstack return address): "
-                        << std::endl;
+                        << "Backtrace (based on callstack return address):\n";
                     backtraced_exceptions::print_backtrace(btrace, size);
                 } else {
-                    std::cerr << "Backtrace not available" << std::endl;
+                    std::cerr << "Backtrace not available\n";
                 }
             } catch (...) {
-                std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+                std::cerr << "Unknown C++ exception on exec/eval\n";
             }
 
             auto exec_end = std::chrono::steady_clock::now();
@@ -1535,9 +652,9 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                 continue;
             }
 
-            auto it = varPrinterAddresses.find(var.name);
+            auto it = replState.varPrinterAddresses.find(var.name);
 
-            if (it != varPrinterAddresses.end()) {
+            if (it != replState.varPrinterAddresses.end()) {
                 it->second();
             } else {
                 std::cout << "not found: " << var.name << std::endl;
@@ -1555,7 +672,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     }
 
     if (cfg.lazyEval) {
-        lazyEvalFns.push_back(eval);
+        replState.lazyEvalFns.push_back(eval);
     } else {
         eval();
     }
@@ -1567,7 +684,16 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 bool loadPrebuilt(const std::string &path) {
     std::unordered_map<std::string, std::string> functions;
 
-    std::vector<VarDecl> vars = getBuiltFileDecls(path);
+    std::vector<VarDecl> vars = utility::getBuiltFileDecls(path);
+
+    vars.erase(std::remove_if(vars.begin(), vars.end(),
+                              [](const VarDecl &var) {
+                                  return (var.name == "_init" ||
+                                          var.name == "_fini") ||
+                                         (var.mangledName == "_init" ||
+                                          var.mangledName == "_fini");
+                              }),
+               vars.end());
 
     auto filename = "lib_" + std::filesystem::path(path).filename().string();
 
@@ -1576,11 +702,11 @@ bool loadPrebuilt(const std::string &path) {
     void *handlewp = nullptr;
 
     if (!functions.empty()) {
-        handlewp = dlopen(("./libwrapper_" + filename + ".so").c_str(),
+        handlewp = dlopen(std::format("./libwrapper_{}.so", filename).c_str(),
                           RTLD_NOW | RTLD_GLOBAL);
 
         if (!handlewp) {
-            std::cerr << "Cannot wrapper library: " << dlerror() << '\n';
+            std::cerr << std::format("Cannot wrapper library: {}\n", dlerror());
             // return false;
         }
     }
@@ -1592,27 +718,30 @@ bool loadPrebuilt(const std::string &path) {
     if (filename.ends_with(".a") || filename.ends_with(".o")) {
         // g++  -Wl,--whole-archive base64.cc.o -Wl,--no-whole-archive -shared
         // -o teste.o
-        library = "./" + filename + ".so";
-        std::string cmd = "g++ -Wl,--whole-archive " + path +
-                          " -Wl,--no-whole-archive -shared -o " + library;
+        library = std::format("./{}.so", filename);
+        std::string cmd = std::format(
+            "g++ -Wl,--whole-archive {} -Wl,--no-whole-archive -shared -o {}",
+            path, library);
         std::cout << cmd << std::endl;
         system(cmd.c_str());
     }
 
     auto load_start = std::chrono::steady_clock::now();
 
-    lastLibrary = library;
+    execution::getGlobalExecutionState().setLastLibrary(library);
 
     resolveSymbolOffsetsFromLibraryFile(functions);
 
-    void *handle = dlopen(lastLibrary.c_str(), dlOpenFlags);
+    void *handle =
+        dlopen(execution::getGlobalExecutionState().getLastLibrary().c_str(),
+               dlOpenFlags);
     if (!handle) {
         std::cerr << __FILE__ << ":" << __LINE__
                   << " Cannot open library: " << dlerror() << '\n';
         return false;
     }
 
-    symbolsToResolve.clear();
+    execution::getGlobalExecutionState().clearSymbolsToResolve();
 
     auto load_end = std::chrono::steady_clock::now();
 
@@ -1636,7 +765,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     if (cfg.sourcesList.empty()) {
         if (cfg.analyze) {
             std::tie(vars, returnCode) = buildLibAndDumpASTWithoutPrint(
-                cfg.compiler, cfg.repl_name, {cfg.repl_name + ".cpp"}, cfg.std);
+                cfg.compiler, cfg.repl_name,
+                {std::format("{}.cpp", cfg.repl_name)}, cfg.std);
         } else {
             onlyBuildLib(cfg.compiler, cfg.repl_name, "." + cfg.extension,
                          cfg.std);
@@ -1647,14 +777,15 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
     }
 
     if (returnCode != 0) {
-        shouldRecompilePrecompiledHeader = true;
+        replState.shouldRecompilePrecompiledHeader = true;
         return {};
     }
 
     auto end = std::chrono::steady_clock::now();
 
     {
-        auto vars2 = getBuiltFileDecls("./lib" + cfg.repl_name + ".so");
+        auto vars2 = utility::getBuiltFileDecls(
+            std::format("./lib{}.so", cfg.repl_name));
 
         // add only if it does not exist
         for (const auto &var : vars2) {
@@ -1662,23 +793,138 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
                              [&](const VarDecl &varInst) {
                                  return varInst.mangledName == var.mangledName;
                              }) == vars.end()) {
-                std::cout << __FILE__ << ":" << __LINE__
-                          << " added: " << var.name << std::endl;
+                if (verbosityLevel >= 2) {
+                    std::cout << __FILE__ << ":" << __LINE__
+                              << " added: " << var.name << std::endl;
+                }
                 vars.push_back(var);
             }
         }
     }
 
-    std::cout << "build time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       now)
-                     .count()
-              << "ms" << std::endl;
+    if (verbosityLevel >= 2) {
+        std::cout << "⏱️  Build time: "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                           now)
+                         .count()
+                  << "ms" << std::endl;
+    }
 
     return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
 }
 
-bool useCpp2 = false;
+// Função para identificar se o código é uma definição ou código executável
+bool isDefinitionCode(const std::string &code) {
+    // Remove comentários e espaços em branco para análise
+    std::string trimmed = code;
+
+    // Remove comentários de linha
+    size_t pos = 0;
+    while ((pos = trimmed.find("//", pos)) != std::string::npos) {
+        size_t end = trimmed.find('\n', pos);
+        if (end == std::string::npos)
+            end = trimmed.length();
+        trimmed.erase(pos, end - pos);
+    }
+
+    // Remove comentários de bloco
+    pos = 0;
+    while ((pos = trimmed.find("/*", pos)) != std::string::npos) {
+        size_t end = trimmed.find("*/", pos + 2);
+        if (end == std::string::npos)
+            break;
+        trimmed.erase(pos, end + 2 - pos);
+    }
+
+    // Remove espaços em branco extras
+    trimmed = std::regex_replace(trimmed, std::regex(R"(\s+)"), " ");
+    trimmed = std::regex_replace(trimmed, std::regex(R"(^\s+|\s+$)"), "");
+
+    if (trimmed.empty())
+        return false;
+
+    // Patterns para definições (global scope)
+    std::vector<std::regex> definitionPatterns = {
+        // Declarações de classe/struct/enum
+        std::regex(R"(^\s*(class|struct|enum|union)\s+\w+)"),
+        std::regex(R"(^\s*(template\s*<[^>]*>\s*)?(class|struct)\s+\w+)"),
+
+        // Declarações de namespace
+        std::regex(R"(^\s*namespace\s+\w+)"),
+        std::regex(R"(^\s*using\s+namespace\s+)"),
+        std::regex(R"(^\s*using\s+\w+\s*=)"),
+
+        // Declarações de função (incluindo templates)
+        std::regex(
+            R"(^\s*(template\s*<[^>]*>\s*)?[\w:]+\s+\w+\s*\([^)]*\)\s*(const\s*)?(noexcept\s*)?(\s*->\s*[\w:]+)?\s*[{;])"),
+
+        // Declarações de variáveis globais (com tipos explícitos)
+        std::regex(
+            R"(^\s*(extern\s+)?(const\s+|constexpr\s+)?(static\s+)?[\w:]+\s+\w+(\s*=.*)?;)"),
+        std::regex(
+            R"(^\s*(auto|int|float|double|char|bool|string|std::[\w:]+)\s+\w+(\s*=.*)?;)"),
+
+        // Typedef e type aliases
+        std::regex(R"(^\s*typedef\s+)"),
+        std::regex(R"(^\s*using\s+\w+\s*=\s*)"),
+
+        // Forward declarations
+        std::regex(R"(^\s*(class|struct|enum)\s+\w+\s*;)"),
+
+        // Preprocessor directives (exceto #eval, #return, etc.)
+        std::regex(
+            R"(^\s*#(define|undef|ifdef|ifndef|if|else|elif|endif|include)\s)"),
+    };
+
+    // Verifica se corresponde a algum pattern de definição
+    for (const auto &pattern : definitionPatterns) {
+        if (std::regex_search(trimmed, pattern)) {
+            return true;
+        }
+    }
+
+    // Patterns para código executável (statements)
+    std::vector<std::regex> executablePatterns = {
+        // Chamadas de função simples
+        std::regex(R"(^\s*\w+\s*\([^)]*\)\s*;?\s*$)"),
+
+        // Expressões de atribuição
+        std::regex(R"(^\s*\w+\s*[+\-*/%&|^]?=)"),
+
+        // Estruturas de controle
+        std::regex(
+            R"(^\s*(if|for|while|do|switch|try|catch|throw|return)\s*[\(\{])"),
+
+        // Operadores de incremento/decremento
+        std::regex(R"(^\s*(\+\+\w+|\w+\+\+|--\w+|\w+--)\s*;?\s*$)"),
+
+        // Expressões cout/printf
+        std::regex(R"(^\s*(std::)?(cout|printf|scanf|cin)\s*[<<>>])"),
+
+        // Statements simples sem declaração de tipo
+        std::regex(R"(^\s*\w+(\.\w+|\[\w*\])*\s*[+\-*/%&|^<>=!])")};
+
+    // Se corresponde a pattern executável, não é definição
+    for (const auto &pattern : executablePatterns) {
+        if (std::regex_search(trimmed, pattern)) {
+            return false;
+        }
+    }
+
+    // Casos especiais: se contém apenas expressões/statements sem declarações
+    // e não termina em ';' ou '{}', provavelmente é código executável
+    if (!std::regex_search(trimmed, std::regex(R"([;{}]\s*$)")) &&
+        std::regex_search(trimmed,
+                          std::regex(R"(\w+\s*[+\-*/%<>=!]|\w+\s*\()"))) {
+        return false;
+    }
+
+    // Se chegou até aqui e não foi identificado como executável,
+    // provavelmente é uma definição
+    return true;
+}
+
+// moved into replState
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     std::string line(lineview);
@@ -1686,17 +932,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return false;
     }
 
-    if (line.starts_with("#includedir ")) {
-        line = line.substr(12);
-
-        includeDirectories.insert(line);
-        return true;
-    }
-
-    if (line.starts_with("#compilerdefine ")) {
-        line = line.substr(16);
-
-        preprocessorDefinitions.insert(line);
+    if (handleReplCommand(line, buildSettings, replState.useCpp2)) {
         return true;
     }
 
@@ -1706,87 +942,104 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         if (std::regex_search(line, match, includePattern)) {
             if (match.size() > 1) {
-                std::cout << "File name: " << match[1] << std::endl;
+                std::string fileName = match[1].str();
+                if (verbosityLevel >= 1) {
+                    std::cout
+                        << std::format("📁 Including file: {}\n", fileName);
+                }
 
-                std::filesystem::path p(match[1]);
+                std::filesystem::path p(fileName);
 
                 try {
                     p = std::filesystem::absolute(
                         std::filesystem::canonical(p));
-                } catch (...) {
-                }
 
-                std::string path = p.string();
+                    if (verbosityLevel >= 2) {
+                        std::cout << std::format("   → Resolved path: {}\n",
+                                                 p.string());
+                    }
+                } catch (const std::filesystem::filesystem_error &e) {
+                    if (verbosityLevel >= 2) {
+                        std::cout << std::format(
+                            "   ⚠️  Warning: Could not canonicalize path - {}\n",
+                            e.what());
+                    }
+
+                    if (!compilerService->checkIncludeExists(buildSettings,
+                                                             p.string())) {
+                        std::cerr << std::format(
+                            "❌ Error: Included file does not exist: {}\n",
+                            p.string());
+                        return true;
+                    }
+                }
 
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
-                    shouldRecompilePrecompiledHeader =
-                        includedFiles.insert(path).second;
+                    // TODO: Implementar recompilação baseada em contexto AST
+                    replState.shouldRecompilePrecompiledHeader =
+                        analysis::AstContext::addInclude(p.string());
+
+                    if (replState.shouldRecompilePrecompiledHeader) {
+                        analysis::AstContext::staticSaveHeaderToFile(
+                            "decl_amalgama.hpp");
+                    }
+
+                    if (replState.shouldRecompilePrecompiledHeader &&
+                        verbosityLevel >= 2) {
+                        std::cout
+                            << "   🔄 Marked for precompiled header rebuild\n";
+                    }
                 }
             } else {
-                std::cout << "File name not found" << std::endl;
+                std::cerr << "❌ Error: Could not parse include directive\n";
                 return true;
             }
         } else {
-            std::cout << "File name not found" << std::endl;
+            std::cerr << "❌ Error: Invalid include syntax. Use: #include "
+                         "<header> or #include \"header\"\n";
             return true;
         }
         return true;
     }
 
-    if (shouldRecompilePrecompiledHeader) {
+    if (replState.shouldRecompilePrecompiledHeader) {
+        std::cout << "🔨 Rebuilding precompiled header...\n";
         build_precompiledheader();
-        shouldRecompilePrecompiledHeader = false;
+        replState.shouldRecompilePrecompiledHeader = false;
+        std::cout << "✅ Precompiled header rebuilt successfully\n";
     }
 
     if (line == "printall") {
-        std::cout << "printall" << std::endl;
-
-        savePrintAllVarsLibrary(allTheVariables);
+        std::cout << "📊 Printing all variables...\n";
+        savePrintAllVarsLibrary(replState.allTheVariables);
         runPrintAll();
         return true;
     }
 
     if (line == "evalall") {
+        std::cout << "⚡ Evaluating all lazy expressions...\n";
         evalEverything();
         return true;
     }
 
-    if (line.starts_with("#lib ")) {
-        line = line.substr(5);
+    // command parsing handled above
 
-        linkLibraries.insert(line);
-        return true;
-    }
+    if (replState.varsNames.contains(line)) {
+        auto it = replState.varPrinterAddresses.find(line);
 
-    if (line.starts_with("#loadprebuilt ")) {
-        line = line.substr(14);
-
-        loadPrebuilt(line);
-        return true;
-    }
-
-    if (line.starts_with("#cpp2")) {
-        useCpp2 = true;
-        return true;
-    }
-
-    if (line.starts_with("#cpp1")) {
-        useCpp2 = false;
-        return true;
-    }
-
-    if (varsNames.contains(line)) {
-        auto it = varPrinterAddresses.find(line);
-
-        if (it != varPrinterAddresses.end()) {
+        if (it != replState.varPrinterAddresses.end()) {
+            std::cout << std::format("🔍 Printing variable: {}\n", line);
             it->second();
             return true;
         } else {
-            std::cout << "not found" << std::endl;
+            std::cerr << std::format("❌ Error: Variable '{}' found in names "
+                                     "but not in printer addresses\n",
+                                     line);
         }
 
-        std::cout << "printdata(" << line << ");" << std::endl;
+        std::cout << std::format("🔧 Generating printer for variable: {}\n",
+                                 line);
 
         std::fstream printerOutput("printerOutput.cpp",
                                    std::ios::out | std::ios::trunc);
@@ -1794,13 +1047,12 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
 
         printerOutput << "void printall() {\n";
-
-        printerOutput << "printdata(" << line << ");\n";
-
+        printerOutput << std::format("    printdata({});\n", line);
         printerOutput << "}\n";
 
         printerOutput.close();
 
+        std::cout << "📦 Building printer library...\n";
         onlyBuildLib("clang++", "printerOutput");
 
         runPrintAll();
@@ -1811,7 +1063,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     CompilerCodeCfg cfg;
 
     cfg.lazyEval = line.starts_with("#lazyeval ");
-    cfg.use_cpp2 = useCpp2;
+    cfg.use_cpp2 = replState.useCpp2;
 
     if (line.starts_with("#batch_eval ")) {
         line = line.substr(11);
@@ -1832,53 +1084,113 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
         if (std::filesystem::exists(line)) {
             cfg.fileWrap = false;
-
             cfg.sourcesList.push_back(line);
             auto textension = line.substr(line.find_last_of('.') + 1);
-            /*std::fstream file(line, std::ios::in);
 
-
-            line.clear();
-            std::copy(std::istreambuf_iterator<char>(file),
-                      std::istreambuf_iterator<char>(),
-                      std::back_inserter(line));*/
-
-            std::cout << "extension: " << textension << std::endl;
+            std::cout << std::format("📄 Processing file: {} (extension: {})\n",
+                                     line, textension);
 
             if (textension == "h" || textension == "hpp") {
                 cfg.addIncludes = false;
+                std::cout << "   → Header file detected - includes disabled\n";
             }
 
-            cfg.use_cpp2 = (textension == "cpp2");
+            if (textension == "cpp2") {
+                cfg.use_cpp2 = true;
+                std::cout << "   → cpp2 mode enabled\n";
+            }
 
             if (textension == "c") {
                 cfg.extension = textension;
                 cfg.analyze = false;
                 cfg.addIncludes = false;
-
                 cfg.std = "c17";
                 cfg.compiler = "clang";
+                std::cout << "   → C source detected - using clang with C17 "
+                             "standard\n";
             }
         } else {
-            line = "void exec() { " + line + "; }\n";
-            cfg.analyze = false;
+            // Detecção inteligente: definição vs código executável
+            if (isDefinitionCode(line)) {
+                // É uma definição - adiciona ao escopo global sem exec()
+                if (verbosityLevel >= 2) {
+                    std::cout << "🔧 Detected global definition\n";
+                } else if (verbosityLevel >= 1) {
+                    std::cout << std::format(
+                        "🔧 Global definition: {}\n",
+                        line.length() > 50 ? line.substr(0, 47) + "..." : line);
+                }
+                // Não envolver em exec(), deixar como definição global
+                cfg.analyze = true; // Queremos analisar definições para AST
+            } else {
+                // É código executável - envolver em exec()
+                if (verbosityLevel >= 2) {
+                    std::cout << "⚡ Detected executable code\n";
+                } else if (verbosityLevel >= 1) {
+                    std::cout << std::format(
+                        "⚡ Executable: {}\n",
+                        line.length() > 50 ? line.substr(0, 47) + "..." : line);
+                }
+                line = std::format("void exec() {{ {}; }}\n", line);
+                cfg.analyze = false;
+            }
         }
     }
 
     if (line.starts_with("#return ")) {
-        line = line.substr(8);
+        std::string expression = line.substr(8);
 
-        line = "void exec() { printdata(((" + line + ")), " +
-               utility::quote(line) + ", typeid(decltype((" + line +
-               "))).name()); }\n";
+        if (verbosityLevel >= 1) {
+            std::cout << std::format("🔍 Evaluating expression: {}\n",
+                                     expression);
+        }
+
+        line = std::format("void exec() {{ printdata((({0})), {1}, "
+                           "typeid(decltype(({0}))).name()); }}",
+                           expression, utility::quote(expression));
 
         cfg.analyze = false;
     }
 
-    if (auto rerun = evalResults.find(line); rerun != evalResults.end()) {
+    // std::cout << line << std::endl;
+
+    // Se chegou até aqui e não foi processado por comando especial,
+    // aplica detecção inteligente para código normal
+    if (cfg.fileWrap && !line.starts_with("#eval") &&
+        !line.starts_with("#lazyeval") && !line.starts_with("#return") &&
+        !line.starts_with("#batch_eval")) {
+
+        if (isDefinitionCode(line)) {
+            // É uma definição - mantém no escopo global
+            if (verbosityLevel >= 2) {
+                std::cout << "🔧 Global definition detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "🔧 Definition: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
+            }
+            cfg.analyze = true; // Analisar AST para definições
+        } else {
+            // É código executável - envolver em exec()
+            if (verbosityLevel >= 2) {
+                std::cout << "⚡ Executable code detected\n";
+            } else if (verbosityLevel >= 1) {
+                std::cout << std::format(
+                    "⚡ Code: {}\n",
+                    line.length() > 40 ? line.substr(0, 37) + "..." : line);
+            }
+            line = std::format("void exec() {{ {}; }}\n", line);
+            cfg.analyze = false;
+        }
+    }
+
+    if (auto rerun = replState.evalResults.find(line);
+        rerun != replState.evalResults.end()) {
         try {
             if (rerun->second.exec) {
-                std::cout << "Rerunning compiled command" << std::endl;
+                if (verbosityLevel >= 2) {
+                    std::cout << "🔄 Rerunning cached command" << std::endl;
+                }
                 rerun->second.exec();
                 return true;
             }
@@ -1893,40 +1205,41 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
             auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
 
             if (btrace != nullptr && size > 0) {
-                std::cerr << "Backtrace: " << std::endl;
-
+                std::cerr << "Backtrace:\n";
                 backtraced_exceptions::print_backtrace(btrace, size);
             } else {
-                std::cerr << "Backtrace not available" << std::endl;
+                std::cerr << "Backtrace not available\n";
             }
         } catch (const std::exception &e) {
-            std::cerr << "C++ exception on exec/eval: " << e.what()
-                      << std::endl;
+            std::cerr << std::format("C++ exception on exec/eval: {}\n",
+                                     e.what());
 
             auto [btrace, size] = backtraced_exceptions::get_backtrace_for(e);
 
             if (btrace != nullptr && size > 0) {
-                std::cerr << "Backtrace: " << std::endl;
-
+                std::cerr << "Backtrace:\n";
                 backtraced_exceptions::print_backtrace(btrace, size);
             } else {
-                std::cerr << "Backtrace not available" << std::endl;
+                std::cerr << "Backtrace not available\n";
             }
         } catch (...) {
-            std::cerr << "Unknown C++ exception on exec/eval" << std::endl;
+            std::cerr << "Unknown C++ exception on exec/eval\n";
         }
 
         return true;
     }
 
-    // std::cout << line << std::endl;
-
-    cfg.repl_name = "repl_" + std::to_string(i++);
+    cfg.repl_name = std::format("repl_{}", i++);
 
     if (cfg.fileWrap) {
-        std::fstream replOutput(cfg.repl_name + "." +
-                                    (cfg.use_cpp2 ? "cpp2" : cfg.extension),
-                                std::ios::out | std::ios::trunc);
+        std::string fileName = std::format(
+            "{}.{}", cfg.repl_name, (cfg.use_cpp2 ? "cpp2" : cfg.extension));
+
+        if (verbosityLevel >= 2) {
+            std::cout << std::format("📝 Writing source to: {}\n", fileName);
+        }
+
+        std::fstream replOutput(fileName, std::ios::out | std::ios::trunc);
 
         if (cfg.addIncludes) {
             replOutput << "#include \"precompiledheader.hpp\"\n\n";
@@ -1934,24 +1247,41 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         }
 
         replOutput << line << std::endl;
-
         replOutput.close();
     }
 
     if (cfg.use_cpp2) {
-        int cppfrontres =
-            system(("./cppfront " + cfg.repl_name + ".cpp2").c_str());
+        std::string cppfrontCmd =
+            std::format("./cppfront {}.cpp2", cfg.repl_name);
+
+        if (verbosityLevel >= 1) {
+            std::cout << std::format("🔄 Running cppfront: {}\n", cppfrontCmd);
+        }
+
+        int cppfrontres = system(cppfrontCmd.c_str());
 
         if (cppfrontres != 0) {
-            std::cerr << "cppfrontres != 0: " << cfg.repl_name << std::endl;
+            std::cerr << std::format(
+                "❌ cppfront failed with code {} for: {}\n", cppfrontres,
+                cfg.repl_name);
             return false;
         }
+    }
+
+    if (verbosityLevel >= 1) {
+        std::cout << std::format("🚀 Compiling and executing: {}\n",
+                                 cfg.repl_name);
     }
 
     auto evalRes = compileAndRunCode(std::move(cfg));
 
     if (evalRes.success) {
-        evalResults.insert_or_assign(line, evalRes);
+        replState.evalResults.insert_or_assign(line, evalRes);
+        if (verbosityLevel >= 2) {
+            std::cout << "✅ Command executed successfully and cached\n";
+        }
+    } else if (verbosityLevel >= 1) {
+        std::cout << "❌ Command execution failed\n";
     }
 
     return true;
@@ -1974,7 +1304,7 @@ auto compileAndRunCodeCustom(
     }
 
     CompilerCodeCfg cfg;
-    cfg.repl_name = "custom_lib_" + std::to_string(replCounter++);
+    cfg.repl_name = std::format("custom_lib_{}", replCounter++);
 
     returnCode = linkAllObjects(objects, cfg.repl_name);
 
@@ -2022,40 +1352,98 @@ void repl() {
         perror("Failed to read history");
     }
 
+    // Mostrar comando de boas-vindas automaticamente apenas se verbosidade >= 1
+    if (verbosityLevel >= 1) {
+        std::cout
+            << "\n🎉 Welcome to C++ REPL - Interactive C++ Development!\n";
+        std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                     "━━━━━━━━━━━━━━━━━━\n";
+        std::cout << "💡 Quick tip: Type '#help' for commands, '#welcome' for "
+                     "full guide\n\n";
+    }
+
     while (true) {
+        // Prompt counter para numeração das linhas
+        static int promptCounter = 1;
+
         try {
-            char *input = readline(">>> ");
+            // Prompt mais amigável com indicador de linha
+            std::string prompt = std::format("C++[{}]>>> ", promptCounter);
+            char *input = readline(prompt.c_str());
 
             if (input == nullptr) {
+                std::cout << "\n👋 Goodbye! Thanks for using C++ REPL.\n";
                 break;
             }
 
             line = input;
             free(input);
+
+            // Skip empty lines
+            if (line.empty() ||
+                std::all_of(line.begin(), line.end(), ::isspace)) {
+                continue;
+            }
+
         } catch (const segvcatch::interrupted_by_the_user &e) {
-            std::cout << "Ctrl-C pressed" << std::endl;
-            break;
+            if (verbosityLevel >= 1) {
+                std::cout << "\n⚠️  Interrupted by user (Ctrl-C)\n";
+                std::cout << "💡 Type 'exit' to quit gracefully\n";
+            }
+            continue;
         }
 
         ctrlcounter = 0;
         add_history(line.c_str());
 
+        // Show feedback for long operations
+        auto start_time = std::chrono::steady_clock::now();
+
         try {
             if (!extExecRepl(line)) {
                 break;
             }
+
+            promptCounter++;
+
+            // Show timing for operations longer than 100ms (apenas com
+            // verbosidade >= 2)
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time);
+            if (verbosityLevel >= 2 && duration.count() > 100) {
+                std::cout << std::format("⏱️  Execution time: {}ms\n",
+                                         duration.count());
+            }
+
         } catch (const segvcatch::segmentation_fault &e) {
-            std::cerr << "Segmentation fault: " << e.what() << std::endl;
-            std::cerr << assembly_info::getInstructionAndSource(
-                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
-                      << std::endl;
+            std::cerr << std::format("💥 Segmentation fault: {}\n", e.what());
+            if (verbosityLevel >= 3) {
+                std::cerr << "🔍 Debug info: ";
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+            }
+            if (verbosityLevel >= 1) {
+                std::cerr
+                    << "💡 Tip: Use '-s' flag to enable crash protection\n";
+            }
         } catch (const segvcatch::floating_point_error &e) {
-            std::cerr << "Floating point error: " << e.what() << std::endl;
-            std::cerr << assembly_info::getInstructionAndSource(
-                             getpid(), reinterpret_cast<uintptr_t>(e.info.addr))
-                      << std::endl;
+            std::cerr << std::format("🔢 Floating point error: {}\n", e.what());
+            if (verbosityLevel >= 3) {
+                std::cerr << "🔍 Debug info: ";
+                std::cerr << assembly_info::getInstructionAndSource(
+                                 getpid(),
+                                 reinterpret_cast<uintptr_t>(e.info.addr))
+                          << std::endl;
+            }
         } catch (const std::exception &e) {
-            std::cerr << "C++ Exception: " << e.what() << std::endl;
+            std::cerr << std::format("❌ C++ Exception: {}\n", e.what());
+            if (verbosityLevel >= 1) {
+                std::cerr << "💡 Check your C++ syntax and try again\n";
+            }
         }
 
         if (bootstrapProgram) {
@@ -2074,14 +1462,17 @@ void initRepl() {
     writeHeaderPrintOverloads();
     build_precompiledheader();
 
-    outputHeader.reserve(1024 * 1024);
-    outputHeader += "#pragma once\n";
-    outputHeader += "#include \"precompiledheader.hpp\"\n";
+    // Inicializar completion com estado atual do REPL
+    completionScope =
+        std::make_unique<completion::SimpleCompletionScope>(replState);
 
-    std::fstream printerOutput("decl_amalgama.hpp",
-                               std::ios::out | std::ios::trunc);
-    printerOutput << outputHeader << std::endl;
-    printerOutput.close();
+    // Criar um contexto AST inicial para inicializar o arquivo
+    // decl_amalgama.hpp
+    auto context = std::make_shared<analysis::AstContext>();
+    context->addDeclaration("#pragma once");
+    context->addDeclaration("#include \"precompiledheader.hpp\"");
+
+    context->saveHeaderToFile("decl_amalgama.hpp");
 }
 
 void initNotifications(std::string_view appName) {
@@ -2094,8 +1485,46 @@ void initNotifications(std::string_view appName) {
 
 void notifyError(std::string_view summary, std::string_view msg) {
 #ifndef NUSELIBNOTIFY
-    NotifyNotification *notification = notify_notification_new(
-        summary.data(), msg.data(), "/home/fabio/Downloads/icons8-erro-64.png");
+    // Função para encontrar ícone com fallback
+    auto findIcon = [](const std::string &iconName) -> std::string {
+        std::vector<std::string> searchPaths;
+
+        // 1. Tentar PNG path primeiro (se disponível)
+#ifdef CPPREPL_ICON_PNG_PATH
+        searchPaths.push_back(std::string(CPPREPL_ICON_PNG_PATH) + "/" +
+                              iconName + ".png");
+#endif
+
+        // 2. Tentar SVG path
+#ifdef CPPREPL_ICON_PATH
+        searchPaths.push_back(std::string(CPPREPL_ICON_PATH) + "/" + iconName +
+                              ".svg");
+#endif
+
+        // 3. Fallback para ícones do sistema
+        searchPaths.push_back("/usr/share/icons/hicolor/48x48/apps/error.png");
+        searchPaths.push_back("/usr/share/pixmaps/dialog-error.png");
+        searchPaths.push_back("dialog-error"); // Nome simbólico
+
+        for (const auto &path : searchPaths) {
+            if (path.find('/') != std::string::npos) {
+                // É um caminho de arquivo - verificar se existe
+                if (std::filesystem::exists(path)) {
+                    return path;
+                }
+            } else {
+                // É um nome simbólico - retornar diretamente
+                return path;
+            }
+        }
+
+        return "dialog-error"; // Fallback final
+    };
+
+    std::string iconPath = findIcon("circle-alert");
+
+    NotifyNotification *notification =
+        notify_notification_new(summary.data(), msg.data(), iconPath.c_str());
 
     // Set the urgency level of the notification
     notify_notification_set_urgency(notification, NOTIFY_URGENCY_CRITICAL);
@@ -2103,7 +1532,7 @@ void notifyError(std::string_view summary, std::string_view msg) {
     // Show the notification
     notify_notification_show(notification, NULL);
 #else
-    std::cerr << summary << ": " << msg << std::endl;
+    std::cerr << std::format("🚨 {}: {}", summary, msg) << std::endl;
 #endif
 }
 
