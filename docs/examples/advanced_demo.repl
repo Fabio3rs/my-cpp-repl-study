@@ -1,0 +1,41 @@
+// Advanced features demonstration
+// Save as: examples/advanced_demo.repl  
+// Run with: ./cpprepl -s -v -r examples/advanced_demo.repl
+
+// Include directory setup
+#includedir /usr/include/c++/13
+
+// Library linking
+#lib pthread
+
+// Preprocessor definitions
+#compilerdefine DEBUG=1
+
+// Include headers
+#include <thread>
+#include <chrono>
+#include <mutex>
+
+// Global mutex for thread safety
+std::mutex output_mutex;
+
+// Thread-safe function
+void thread_worker(int id) {
+    std::scoped_lock lock(output_mutex);
+    std::cout << "Thread " << id << " working\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::cout << "Thread " << id << " done\n";
+}
+
+// Create and run threads
+std::vector<std::thread> threads;
+for (int i = 0; i < 3; ++i) {
+    threads.emplace_back(thread_worker, i);
+}
+
+// Wait for all threads
+for (auto& t : threads) {
+    t.join();
+}
+
+#return threads.size()

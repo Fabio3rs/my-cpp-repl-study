@@ -73,3 +73,6 @@ gmon.out
 
 # Core dumps
 core.*
+
+# Generated documentation
+docs/api/
