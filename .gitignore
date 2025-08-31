@@ -10,6 +10,17 @@ Makefile
 compile_commands.json
 CTestTestfile.cmake
 
+# REPL-generated files (build artifacts)
+debug_output.json
+decl_amalgama.hpp
+history.txt
+precompiledheader.hpp*
+printerOutput*.hpp
+printerOutput*.cpp
+repl_*.cpp
+repl_*.json
+wrapper_repl_*.cpp
+
 # Object files and libraries
 *.o
 *.obj
