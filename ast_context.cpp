@@ -32,7 +32,7 @@ std::vector<CodeTracking> AstContext::codeSnippets_;
 AstContext::AstContext() {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (outputHeader_.empty()) {
-        outputHeader_.reserve(1024 * 1024); // Reservar 1MB inicialmente
+        outputHeader_.reserve(1024 * 10); // Reserva inicial de 10KB
     }
 }
 

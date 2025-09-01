@@ -18,7 +18,7 @@ runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int> {
         return result;
     }
 
-    constexpr size_t MBPAGE2 = 1024 * 1024 * 2;
+    constexpr size_t MBPAGE2 = 1024 * 2;
 
     auto &buffer = result.first;
     try {
