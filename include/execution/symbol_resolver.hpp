@@ -34,6 +34,7 @@ class SymbolResolver {
      */
     struct WrapperConfig {
         std::string libraryPath;
+        std::string extraArgs{"-nostdlib"};
         std::unordered_map<std::string, uintptr_t> symbolOffsets;
         std::unordered_map<std::string, WrapperInfo> functionWrappers;
     };

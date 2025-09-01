@@ -56,6 +56,11 @@ find_package(Clang QUIET)
 # DEPENDENCY STATUS REPORTING
 # ==============================================================================
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+#  add_compile_options(-fxray-instrument -fxray-instruction-threshold=1 -g)
+#  add_link_options(-fxray-instrument)  # puxa o runtime do XRay automaticamente
+endif()
+
 # Report Clang availability and configuration
 if (Clang_FOUND)
     message(STATUS "✓ Clang found: ${Clang_VERSION}")

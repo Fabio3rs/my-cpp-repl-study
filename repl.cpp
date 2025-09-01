@@ -216,6 +216,16 @@ static void detectLldVersionAndSetFuseLd() {
             std::cout << std::format("Using linker: {} ({})\n", lld_cmd,
                                      output);
         }
+
+        auto &state = execution::getGlobalExecutionState();
+        // TODO: Implementar método para obter funções existentes do state
+
+        // Usar a configuração global persistente
+        auto &config = state.getWrapperConfig();
+
+        if (config.extraArgs.find("-fuse-ld=lld") == std::string::npos) {
+            config.extraArgs += " -fuse-ld=lld";
+        }
     }
 }
 
@@ -522,10 +532,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(

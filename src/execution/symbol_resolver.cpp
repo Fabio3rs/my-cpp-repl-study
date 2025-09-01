@@ -25,8 +25,8 @@ std::string SymbolResolver::generateFunctionWrapper(const VarDecl &fnvars) {
     auto parem = qualTypestr.find_first_of('(');
 
     // Gera declaração da função naked
-    qualTypestr = std::format("extern \"C\" void __attribute__ ((naked)) {}()",
-                              fnvars.mangledName);
+    qualTypestr =
+        std::format("void __attribute__ ((naked)) {}()", fnvars.mangledName);
 
     /*
      * Este é o trampoline que será chamado quando a biblioteca
@@ -36,8 +36,8 @@ std::string SymbolResolver::generateFunctionWrapper(const VarDecl &fnvars) {
     wrapper += std::format("static void __attribute__((naked)) loadFn_{}();\n",
                            fnvars.mangledName);
 
-    wrapper += std::format("extern \"C\" void *{}_ptr = "
-                           "reinterpret_cast<void*>(loadFn_{});\n\n",
+    wrapper += std::format("void *{}_ptr = "
+                           "(void*)(loadFn_{});\n\n",
                            fnvars.mangledName, fnvars.mangledName);
 
     wrapper += qualTypestr + " {\n";
@@ -169,14 +169,14 @@ SymbolResolver::prepareFunctionWrapper(
 
     if (!functions.empty()) {
         auto wrappername = std::format("wrapper_{}", name);
-        std::fstream wrapperOutput(std::format("{}.cpp", wrappername),
+        std::fstream wrapperOutput(std::format("{}.c", wrappername),
                                    std::ios::out | std::ios::trunc);
         wrapperOutput << wrapperCode << std::endl;
         wrapperOutput.close();
 
         // Compilar wrapper
-        int result = onlyBuildLib("clang++", wrappername, ".cpp", "gnu++20",
-                                  "-nostdlib");
+        int result =
+            onlyBuildLib("clang", wrappername, ".c", "c11", config.extraArgs);
         (void)result; // Suprimir warning de variável não utilizada
     }
 
