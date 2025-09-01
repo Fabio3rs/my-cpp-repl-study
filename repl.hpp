@@ -60,6 +60,7 @@ struct BuildSettings {
     std::unordered_set<std::string> linkLibraries;
     std::unordered_set<std::string> includeDirectories;
     std::unordered_set<std::string> preprocessorDefinitions;
+    std::unordered_set<std::string> extraLinkerFlags;
 
     std::string getLinkLibrariesStr() const {
         std::string linkLibrariesStr;
@@ -84,6 +85,14 @@ struct BuildSettings {
             preprocessorDefinitionsStr += " -D" + def;
         }
         return preprocessorDefinitionsStr;
+    }
+
+    std::string getExtraLinkerFlags() const {
+        std::string extraLinkerFlagsStr;
+        for (const auto &flag : extraLinkerFlags) {
+            extraLinkerFlagsStr += " " + flag;
+        }
+        return extraLinkerFlagsStr;
     }
 };
 

@@ -42,7 +42,7 @@ struct CodeTracking {
  */
 class AstContext {
   public:
-    AstContext() = default;
+    AstContext();
     ~AstContext() = default;
 
     // Não copiável, mas movível

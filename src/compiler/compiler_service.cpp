@@ -4,6 +4,7 @@
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
 
+#include "utility/system_exec.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -21,8 +22,6 @@
 #include <unistd.h>
 
 // Forward declaration for helper function from repl.cpp
-extern auto
-runProgramGetOutput(std::string_view cmd) -> std::pair<std::string, int>;
 extern int verbosityLevel;
 
 namespace compiler {
@@ -44,7 +43,7 @@ bool CompilerService::checkIncludeExists(const BuildSettings &settings,
     std::string command = std::format("clang++ -x c++ -E -P {} - < /dev/null "
                                       "-include {} 2>/dev/null",
                                       includeDirsArgs, includePath);
-    auto [output, returnCode] = runProgramGetOutput(command);
+    auto [output, returnCode] = utility::runProgramGetOutput(command);
     return returnCode == 0;
 }
 
@@ -460,10 +459,10 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         try {
             // AST + compile em paralelo
             auto futAst = std::async(std::launch::async, [&, astCmd] {
-                return runProgramGetOutput(astCmd);
+                return utility::runProgramGetOutput(astCmd);
             });
             auto futCC = std::async(std::launch::async, [&, ccCmd] {
-                return runProgramGetOutput(ccCmd);
+                return utility::runProgramGetOutput(ccCmd);
             });
 
             const auto astRes = futAst.get();
@@ -563,6 +562,19 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         return result;
     }
 
+    auto linkerFlags = buildSettings_->getExtraLinkerFlags();
+
+    // Link (sequencial)
+    const std::string linkCmd = std::format(
+        "{} {} -shared -g -Wl,--export-dynamic {} {} -o lib{}.so", compiler,
+        linkerFlags, namesConcated, getLinkLibrariesStr(), libname);
+
+    if (auto linkRes = executeCommand(linkCmd); !linkRes) {
+        result.error = CompilerError::LinkingFailed;
+        result.value.returnCode = linkRes.value;
+        return result;
+    }
+
     const auto t1 = std::chrono::system_clock::now();
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -573,17 +585,6 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         std::cout << std::format(
             "Parallel AST+compile time ({} sources, max {} threads): {}ms\n",
             sources.size(), getEffectiveThreadCount(), ms);
-    }
-
-    // Link (sequencial)
-    const std::string linkCmd =
-        std::format("{} -shared -g -WL,--export-dynamic {} {} -o lib{}.so",
-                    compiler, namesConcated, getLinkLibrariesStr(), libname);
-
-    if (auto linkRes = executeCommand(linkCmd); !linkRes) {
-        result.error = CompilerError::LinkingFailed;
-        result.value.returnCode = linkRes.value;
-        return result;
     }
 
     if (varMergeCallback_) {

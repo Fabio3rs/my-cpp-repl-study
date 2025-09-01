@@ -29,6 +29,13 @@ std::string AstContext::outputHeader_;
 std::unordered_set<std::string> AstContext::includedFiles_;
 std::vector<CodeTracking> AstContext::codeSnippets_;
 
+AstContext::AstContext() {
+    std::scoped_lock<std::mutex> lock(contextWriteMutex);
+    if (outputHeader_.empty()) {
+        outputHeader_.reserve(1024 * 1024); // Reservar 1MB inicialmente
+    }
+}
+
 bool AstContext::addInclude(const std::string &includePath) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {

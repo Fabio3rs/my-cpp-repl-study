@@ -1,4 +1,5 @@
 #include "../include/execution/execution_engine.hpp"
+#include "utility/file_raii.hpp"
 #include <dlfcn.h>
 #include <format>
 #include <iostream>

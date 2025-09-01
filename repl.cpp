@@ -12,10 +12,12 @@
 #include "execution/symbol_resolver.hpp"
 #include "repl.hpp"
 #include "simdjson.h"
+#include "utility/Strutils.hpp"
 #include "utility/assembly_info.hpp"
 #include "utility/file_raii.hpp"
 #include "utility/library_introspection.hpp"
 #include "utility/quote.hpp"
+#include "utility/system_exec.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -85,13 +87,145 @@ static void mergeVarsCallback(const std::vector<VarDecl> &vars) {
 // Instância global do CompilerService
 static std::unique_ptr<compiler::CompilerService> compilerService;
 
-// Inicializar o CompilerService
+static void detectLldVersionAndSetFuseLd() {
+    //  "clang++ -fuse-ld=lld"
+    // Check if lld is available
+    // Tenta encontrar ld.lld ou ld.lld-NN (NN = versão)
+    std::string lld_cmd = "ld.lld";
+    int retcode = -1;
+    std::string output;
+
+    // Busca ld.lld diretamente
+    // Busca ld.lld diretamente no PATH usando std::filesystem
+    namespace fs = std::filesystem;
+    std::vector<std::string> path_dirs;
+    if (const char *env_path = std::getenv("PATH")) {
+        path_dirs = Strutils::split(env_path, ":");
+    }
+
+    // Primeiro, tenta obter a versão do clang atual
+    int clang_version_major = 0;
+    {
+        std::string clang_output;
+        int clang_ret = -1;
+        std::tie(clang_output, clang_ret) =
+            utility::runProgramGetOutput("clang --version");
+        if (clang_ret == 0) {
+            std::regex version_regex(R"(clang version (\d+))");
+            std::smatch match;
+            if (std::regex_search(clang_output, match, version_regex) &&
+                match.size() > 1) {
+                clang_version_major = std::stoi(match[1].str());
+            }
+        }
+    }
+
+    std::string found_lld;
+    // Tenta encontrar ld.lld da mesma versão do clang
+    if (clang_version_major > 0) {
+        std::string lld_candidate =
+            std::format("ld.lld-{}", clang_version_major);
+        for (const auto &dir : path_dirs) {
+            if (!fs::exists(dir) || !fs::is_directory(dir))
+                continue;
+            for (const auto &entry : fs::directory_iterator(dir)) {
+                if (!entry.is_regular_file())
+                    continue;
+                auto filename = entry.path().filename().string();
+                if (filename == lld_candidate) {
+                    found_lld = entry.path().string();
+                    break;
+                }
+            }
+            if (!found_lld.empty()) {
+                break;
+            }
+        }
+        if (!found_lld.empty()) {
+            std::tie(output, retcode) =
+                utility::runProgramGetOutput(found_lld + " --version");
+            if (retcode == 0) {
+                lld_cmd = found_lld;
+            }
+        }
+    }
+
+    // Se não encontrou, busca ld.lld genérico
+    if (found_lld.empty()) {
+        for (const auto &dir : path_dirs) {
+            if (!fs::exists(dir) || !fs::is_directory(dir))
+                continue;
+            for (const auto &entry : fs::directory_iterator(dir)) {
+                if (!entry.is_regular_file())
+                    continue;
+                auto filename = entry.path().filename().string();
+                if (filename == "ld.lld") {
+                    found_lld = entry.path().string();
+                    break;
+                }
+            }
+            if (!found_lld.empty()) {
+                break;
+            }
+        }
+        if (!found_lld.empty()) {
+            std::tie(output, retcode) =
+                utility::runProgramGetOutput(found_lld + " --version");
+            if (retcode == 0) {
+                lld_cmd = found_lld;
+            }
+        }
+    }
+
+    // Se ainda não encontrou, tenta versões numeradas (ld.lld-XX)
+    if (found_lld.empty()) {
+        for (int ver = clang_version_major > 0 ? clang_version_major : 21;
+             ver >= 10; --ver) {
+            std::string candidate = std::format("ld.lld-{}", ver);
+            for (const auto &dir : path_dirs) {
+                if (!fs::exists(dir) || !fs::is_directory(dir))
+                    continue;
+                for (const auto &entry : fs::directory_iterator(dir)) {
+                    if (!entry.is_regular_file())
+                        continue;
+                    auto filename = entry.path().filename().string();
+                    if (filename == candidate) {
+                        found_lld = entry.path().string();
+                        break;
+                    }
+                }
+                if (!found_lld.empty()) {
+                    break;
+                }
+            }
+            if (!found_lld.empty()) {
+                std::tie(output, retcode) =
+                    utility::runProgramGetOutput(found_lld + " --version");
+                if (retcode == 0) {
+                    lld_cmd = found_lld;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (retcode == 0) {
+        buildSettings.extraLinkerFlags.insert("-fuse-ld=lld");
+
+        if (verbosityLevel >= 1) {
+            std::cout << std::format("Using linker: {} ({})\n", lld_cmd,
+                                     output);
+        }
+    }
+}
+
 static void initCompilerService() {
     if (!compilerService) {
         compilerService = std::make_unique<compiler::CompilerService>(
             &buildSettings,
             nullptr, // AstContext será definido quando necessário
             mergeVarsCallback);
+        detectLldVersionAndSetFuseLd();
     }
 }
 
@@ -164,62 +298,6 @@ static std::mutex varsWriteMutex;
 
 // Funções analyzeInnerAST, analyzeASTFromJsonString e analyzeASTFile
 // foram movidas para analysis::ContextualAstAnalyzer
-
-auto runProgramGetOutput(std::string_view cmd) {
-    std::pair<std::string, int> result{{}, -1};
-
-    auto pipe = utility::make_popen(cmd.data(), "r");
-
-    if (!pipe) {
-        std::cerr << "popen() failed!" << std::endl;
-        return result;
-    }
-
-    constexpr size_t MBPAGE2 = 1024 * 1024 * 2;
-
-    auto &buffer = result.first;
-    try {
-        buffer.resize(MBPAGE2);
-    } catch (const std::bad_alloc &e) {
-        pipe.reset();
-        std::cerr << "bad_alloc caught: " << e.what() << std::endl;
-        return result;
-    }
-
-    size_t finalSize = 0;
-
-    while (!feof(pipe.get())) {
-        size_t read = fread(buffer.data() + finalSize, 1,
-                            buffer.size() - finalSize, pipe.get());
-
-        if (read < 0) {
-            std::cerr << "fread() failed!" << std::endl;
-            break;
-        }
-
-        finalSize += read;
-
-        try {
-            if (finalSize == buffer.size()) {
-                buffer.resize(buffer.size() * 2);
-            }
-        } catch (const std::bad_alloc &e) {
-            std::cerr << "bad_alloc caught: " << e.what() << std::endl;
-            break;
-        }
-    }
-
-    pipe.reset();
-    result.second = pipe.get_deleter().retcode;
-
-    if (result.second != 0) {
-        std::cerr << std::format("program failed! {}\n", result.second);
-    }
-
-    buffer.resize(finalSize);
-
-    return result;
-}
 
 int build_precompiledheader(
     std::string compiler = "clang++",
@@ -444,11 +522,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
