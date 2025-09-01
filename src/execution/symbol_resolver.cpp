@@ -133,11 +133,11 @@ std::string SymbolResolver::generateFunctionWrapper(const VarDecl &fnvars) {
     return wrapper;
 }
 
-std::unordered_map<std::string, std::string>
+std::pair<std::unordered_map<std::string, std::string>, bool>
 SymbolResolver::prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     WrapperConfig &config,
-    const std::unordered_set<std::string> &existingFunctions) {
+    const std::unordered_map<std::string, std::string> &existingFunctions) {
 
     std::string wrapperCode;
     std::unordered_map<std::string, std::string> functions;
@@ -167,7 +167,7 @@ SymbolResolver::prepareFunctionWrapper(
         functions[fnvars.mangledName] = fnvars.name;
     }
 
-    if (!functions.empty()) {
+    if (!wrapperCode.empty()) {
         auto wrappername = std::format("wrapper_{}", name);
         std::fstream wrapperOutput(std::format("{}.c", wrappername),
                                    std::ios::out | std::ios::trunc);
@@ -180,7 +180,7 @@ SymbolResolver::prepareFunctionWrapper(
         (void)result; // Suprimir warning de variável não utilizada
     }
 
-    return functions;
+    return {functions, !wrapperCode.empty()};
 }
 
 void SymbolResolver::fillWrapperPtrs(
@@ -200,6 +200,8 @@ void SymbolResolver::fillWrapperPtrs(
 
             auto it = config.functionWrappers.find(mangledName);
             if (it == config.functionWrappers.end()) {
+                std::cerr << std::format("Cannot find wrapper '{}'\n",
+                                         mangledName);
                 continue;
             }
 
@@ -216,6 +218,9 @@ void SymbolResolver::fillWrapperPtrs(
             void **wrap_ptrfn = fnWrapper.wrap_ptrfn;
             if (wrap_ptrfn) {
                 *wrap_ptrfn = fnptr;
+            } else {
+                std::cerr << std::format("Cannot find wrap_ptrfn for '{}'\n",
+                                         mangledName);
             }
             continue;
         }

@@ -532,11 +532,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -584,20 +583,25 @@ int runPrintAll() {
 // MOVED: lastLibrary and symbolsToResolve moved to
 // execution::GlobalExecutionState
 
-void prepareFunctionWrapper(
+bool prepareFunctionWrapper(
     const std::string &name, const std::vector<VarDecl> &vars,
     std::unordered_map<std::string, std::string> &functions) {
 
     // Obter funções existentes do execution state
-    std::unordered_set<std::string> existingFunctions;
     auto &state = execution::getGlobalExecutionState();
     // TODO: Implementar método para obter funções existentes do state
 
     // Usar a configuração global persistente
     auto &config = state.getWrapperConfig();
 
-    functions = execution::SymbolResolver::prepareFunctionWrapper(
-        name, vars, config, existingFunctions);
+    bool wrapperCreated = false;
+
+    std::tie(functions, wrapperCreated) =
+        execution::SymbolResolver::prepareFunctionWrapper(
+            name, vars, config, state.existingFunctions);
+
+    state.existingFunctions.insert(functions.begin(), functions.end());
+    return wrapperCreated;
 }
 
 void fillWrapperPtrs(
@@ -642,11 +646,12 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                                  std::vector<VarDecl> &&vars) -> EvalResult {
     std::unordered_map<std::string, std::string> functions;
 
-    prepareFunctionWrapper(cfg.repl_name, vars, functions);
+    bool wrapperCreated =
+        prepareFunctionWrapper(cfg.repl_name, vars, functions);
 
     void *handlewp = nullptr;
 
-    if (!functions.empty()) {
+    if (!functions.empty() && wrapperCreated) {
         handlewp =
             dlopen(std::format("./libwrapper_{}.so", cfg.repl_name).c_str(),
                    RTLD_NOW | RTLD_GLOBAL);

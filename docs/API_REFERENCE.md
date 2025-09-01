@@ -323,9 +323,17 @@ public:
      */
     struct WrapperConfig {
         std::string libraryPath;
+        std::string extraArgs{"-nostdlib"};
         std::unordered_map<std::string, uintptr_t> symbolOffsets;
         std::unordered_map<std::string, WrapperInfo> functionWrappers;
+
+        WrapperConfig() = default;
+        WrapperConfig(const WrapperConfig &) = delete;
+        WrapperConfig &operator=(const WrapperConfig &) = delete;
+        WrapperConfig(WrapperConfig &&) = default;
+        WrapperConfig &operator=(WrapperConfig &&) = default;
     };
+
     
     /**
      * @brief Generate C++ code for a function trampoline

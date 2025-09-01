@@ -21,6 +21,8 @@ struct GlobalExecutionState {
     std::unordered_map<std::string, uintptr_t> symbolsToResolve;
     std::unordered_map<std::string, wrapperFn> fnNames;
 
+    std::unordered_map<std::string, std::string> existingFunctions;
+
     // Configuração global para resolução de símbolos via trampolines
     SymbolResolver::WrapperConfig wrapperConfig;
 
@@ -43,6 +45,16 @@ struct GlobalExecutionState {
     // Métodos para gerenciar configuração de wrappers
     SymbolResolver::WrapperConfig &getWrapperConfig();
     void initializeWrapperConfig();
+
+    friend GlobalExecutionState &getGlobalExecutionState();
+
+  private:
+    GlobalExecutionState() = default;
+    ~GlobalExecutionState() = default;
+    GlobalExecutionState(const GlobalExecutionState &) = delete;
+    GlobalExecutionState &operator=(const GlobalExecutionState &) = delete;
+    GlobalExecutionState(GlobalExecutionState &&) = delete;
+    GlobalExecutionState &operator=(GlobalExecutionState &&) = delete;
 };
 
 // Acesso controlado ao estado global singleton

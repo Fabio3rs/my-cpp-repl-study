@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Forward declarations
@@ -25,8 +26,8 @@ class SymbolResolver {
      * @brief Estrutura para manter informações de uma função wrapper
      */
     struct WrapperInfo {
-        void *fnptr;
-        void **wrap_ptrfn;
+        void *fnptr{};
+        void **wrap_ptrfn{};
     };
 
     /**
@@ -37,6 +38,12 @@ class SymbolResolver {
         std::string extraArgs{"-nostdlib"};
         std::unordered_map<std::string, uintptr_t> symbolOffsets;
         std::unordered_map<std::string, WrapperInfo> functionWrappers;
+
+        WrapperConfig() = default;
+        WrapperConfig(const WrapperConfig &) = delete;
+        WrapperConfig &operator=(const WrapperConfig &) = delete;
+        WrapperConfig(WrapperConfig &&) = default;
+        WrapperConfig &operator=(WrapperConfig &&) = default;
     };
 
     /**
@@ -54,12 +61,14 @@ class SymbolResolver {
      * @param vars Lista de declarações de variáveis/funções
      * @param config Configuração de wrappers (será preenchida)
      * @param existingFunctions Funções já processadas (para evitar duplicação)
-     * @return Mapa de nomes mangles para nomes de função
+     * @return Pair de Mapa de nomes mangles para nomes de função e um bool que
+     * indica se novos wrappers foram criados
      */
-    static std::unordered_map<std::string, std::string> prepareFunctionWrapper(
+    static std::pair<std::unordered_map<std::string, std::string>, bool>
+    prepareFunctionWrapper(
         const std::string &name, const std::vector<VarDecl> &vars,
         WrapperConfig &config,
-        const std::unordered_set<std::string> &existingFunctions);
+        const std::unordered_map<std::string, std::string> &existingFunctions);
 
     /**
      * @brief Preenche ponteiros de wrapper após carregamento da biblioteca
