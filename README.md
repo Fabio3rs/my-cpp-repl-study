@@ -7,7 +7,7 @@
 [![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-~7500-informational.svg)](.)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success.svg)](.)
 [![Version](https://img.shields.io/badge/Version-1.5--alpha-yellow.svg)](.)
-[![Tests](https://img.shields.io/badge/Tests-13%2F14%20passing-brightgreen.svg)](.)
+[![Tests](https://img.shields.io/badge/Tests-118%2F118%20passing-brightgreen.svg)](.)
 
 **Alpha Release**: Interactive C++ development through dynamic compilation and crash-safe execution
 
@@ -33,7 +33,7 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 - **150MB peak memory usage** during complex compilations
 - **Linear scaling** with available CPU cores for multi-file processing
 
-**Alpha Status**: With **7,500+ lines** of tested code and **13/14 tests passing (92.8% success rate)**, the system demonstrates stable core functionality while some advanced features remain in development for v2.0.
+**Alpha Status**: With **7,500+ lines** of tested code and **118/118 tests passing (100% success rate)**, the system demonstrates stable core functionality while some advanced features remain in development for v2.0.
 
 ## ✅ **Working Features (v1.5-alpha)**
 
