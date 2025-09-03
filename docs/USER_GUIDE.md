@@ -1,10 +1,10 @@
-# C++ REPL v2.0.0 - User Guide
+# C++ REPL v1.5-alpha - User Guide
 
-[![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/) [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites) [![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](.) 
+[![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/) [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites) [![Version](https://img.shields.io/badge/Version-1.5--alpha-yellow.svg)](.) 
 
-**C++ REPL v2.0.0** is an interactive C++ development environment that compiles your code to native machine code and executes it in real-time. This production release provides stable core functionality with **Clang code completion**, **crash-safe execution**, and **parallel compilation**.
+**C++ REPL v1.5-alpha** is an interactive C++ development environment that compiles your code to native machine code and executes it in real-time. This alpha release provides stable core functionality with **simple completion**, **crash-safe execution**, and **parallel compilation**.
 
-## ✅ **Current Features (v2.0.0)**
+## ✅ **Current Features (v1.5-alpha)**
 
 - ✅ **Interactive C++ execution** - Line-by-line compilation and execution  
 - ✅ **Variable persistence** - Variables maintain state across REPL sessions

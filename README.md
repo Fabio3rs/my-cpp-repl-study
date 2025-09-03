@@ -1,4 +1,4 @@
-# C++ REPL v2.0.0 - Interactive C++ Development Environment
+# C++ REPL v1.5-alpha - Interactive C++ Development Environment
 
 [![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/)
@@ -6,20 +6,20 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites)
 [![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-~7500-informational.svg)](.)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success.svg)](.)
-[![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](.)
-[![Tests](https://img.shields.io/badge/Tests-118%2F118%20passing-brightgreen.svg)](.)
+[![Version](https://img.shields.io/badge/Version-1.5--alpha-yellow.svg)](.)
+[![Tests](https://img.shields.io/badge/Tests-13%2F14%20passing-brightgreen.svg)](.)
 
-**Stable Release**: Interactive C++ development through dynamic compilation and crash-safe execution
+**Alpha Release**: Interactive C++ development through dynamic compilation and crash-safe execution
 
-**Current Features**: Dynamic compilation • Signal-to-exception translation • Parallel compilation pipeline • Clang code completion • Real-time function replacement • Assembly-level debugging • AST analysis
+**Current Features**: Dynamic compilation • Signal-to-exception translation • Parallel compilation pipeline • Simple autocompletion • Real-time function replacement • Assembly-level debugging • AST analysis
 
 ---
 
 ## Abstract
 
-This project presents a **C++ REPL (Read-Eval-Print Loop) v2.0.0** - an interactive programming environment where users can write, test, and execute C++ code line by line, similar to Python's interactive shell. Unlike existing solutions like clang-repl that interpret code through virtual machines, this implementation compiles each input directly to native machine code with optimizations.
+This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an interactive programming environment where users can write, test, and execute C++ code line by line, similar to Python's interactive shell. Unlike existing solutions like clang-repl that interpret code through virtual machines, this implementation compiles each input directly to native machine code with optimizations.
 
-**Core Architecture (v2.0.0)**: The system employs a **parallel compilation pipeline** that:
+**Core Architecture (v1.5-alpha)**: The system employs a **parallel compilation pipeline** that:
 1. **Compiles user input** into native executable code (shared libraries) using multi-core processing
 2. **Analyzes code semantically** through AST parsing for basic completion
 3. **Loads code dynamically** using the operating system's library loading mechanisms  
@@ -28,14 +28,14 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v2.0.0** - an interact
 
 **Performance Achievements (Measured in Ubuntu 24.04)**:
 - **Fast compilation** (80-95ms average) through optimized parallel pipeline and LLVM linker
-- **Clang completion** with sub-100ms response time for semantic suggestions
+- **Simple completion** with basic symbol and keyword matching
 - **0.8s startup time** with intelligent caching systems
 - **150MB peak memory usage** during complex compilations
 - **Linear scaling** with available CPU cores for multi-file processing
 
-**Production Status**: With **118/118 tests passing (100% success rate)** and comprehensive test coverage, the system demonstrates stable core functionality with advanced features fully implemented.
+**Alpha Status**: With **7,500+ lines** of tested code and **13/14 tests passing (92.8% success rate)**, the system demonstrates stable core functionality while some advanced features remain in development for v2.0.
 
-## ✅ **Working Features (v2.0.0)**
+## ✅ **Working Features (v1.5-alpha)**
 
 ### Core REPL Functionality
 - ✅ **Interactive C++ execution** - Line-by-line compilation and execution

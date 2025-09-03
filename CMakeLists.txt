@@ -2,7 +2,7 @@
 # CPPREPL - Modern C++20/23 REPL with Modular Architecture
 # ==============================================================================
 cmake_minimum_required(VERSION 3.10)
-project(cpprepl VERSION 2.0.0)
+project(cpprepl VERSION 1.5.0)
 
 # ==============================================================================
 # PROJECT CONFIGURATION
