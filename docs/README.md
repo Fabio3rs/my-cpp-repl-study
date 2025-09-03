@@ -170,7 +170,7 @@ This documentation is **generated from actual source code analysis** and reflect
 - **Examples:** Real, tested examples from the codebase
 - **Maintenance:** Updated with each major architectural change
 
-**Last Updated:** Based on commit `acd8d65` with complete architecture analysis
+**Last Updated:** Based on commit `9295653` with complete architecture analysis
 
 ---
 

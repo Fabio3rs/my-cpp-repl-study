@@ -2,7 +2,7 @@
 
 [![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/)
-[![License](https://img.shields.io/badge/License-Research-green.svg)](#license-and-acknowledgments)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites)
 [![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-~7500-informational.svg)](.)
 [![Build Status](https://img.shields.io/badge/Build-Passing-success.svg)](.)
@@ -27,7 +27,7 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
 
 **Performance Achievements (Measured in Ubuntu 24.04)**:
-- **Fast compilation** (80-95ms average) through optimized parallel pipeline
+- **Fast compilation** (80-95ms average) through optimized parallel pipeline and LLVM linker
 - **Simple completion** with basic symbol and keyword matching
 - **0.8s startup time** with intelligent caching systems
 - **150MB peak memory usage** during complex compilations
@@ -805,6 +805,10 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 - **Warm Execution**: Subsequent compilations benefit from parallel processing + PCH
 - **Cached Commands**: Identical inputs bypass compilation entirely (cached execution ~1-15μs)
 - **Thread Configuration**: Auto-detects `hardware_concurrency()`, configurable limits
+- **LLVM Linker Optimization**: Automatic detection and configuration of `ld.lld` for faster linking
+  - **Auto-discovery**: Detects compatible LLVM linker versions in PATH (ld.lld-XX variants)
+  - **Version matching**: Prioritizes linker version compatible with installed Clang
+  - **Performance boost**: Significantly faster linking compared to default system linker
 - **Memory Usage**: ~150MB peak during complex compilations
 
 ### Simple Completion Performance ✅ **BASIC FUNCTIONALITY**
