@@ -330,16 +330,15 @@ int build_precompiledheader(
 
 // moved into replState
 
-void printPrepareAllSave(const std::vector<VarDecl> &vars) {
-    if (vars.empty()) {
-        return;
+bool printVarsFilePrepare(const std::string &filename,
+                          const std::vector<VarDecl> &vars) {
+    std::fstream printerOutput(filename, std::ios::out | std::ios::trunc);
+
+    if (!printerOutput.is_open()) {
+        std::cerr << std::format("Cannot open file for writing: {}\n",
+                                 filename);
+        return false;
     }
-
-    static int i = 0;
-    std::string name = std::format("printerOutput{}", i++);
-
-    std::fstream printerOutput(std::format("{}.cpp", name),
-                               std::ios::out | std::ios::trunc);
 
     printerOutput << "#include \"printerOutput.hpp\"\n\n" << std::endl;
     printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
@@ -371,20 +370,29 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
+    return true;
+}
+
+int buildPrinterOutputLib(const std::string &name) {
     int buildLibRes = onlyBuildLib("clang++", name, ".cpp", "gnu++20",
                                    buildSettings.getExtraLinkerFlags(),
                                    "-include printerOutput.hpp");
 
     if (buildLibRes != 0) {
         std::cerr << std::format("buildLibRes != 0: {}\n", name);
-        return;
+        return buildLibRes;
     }
 
+    return 0;
+}
+
+void *loadPrinterForVars(const std::string &name,
+                         const std::vector<VarDecl> &vars) {
     void *handlep =
         dlopen(std::format("./lib{}.so", name).c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (!handlep) {
         std::cerr << std::format("Cannot open library: {}\n", dlerror());
-        return;
+        return handlep;
     }
 
     for (const auto &var : vars) {
@@ -397,12 +405,33 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
                     "Cannot load symbol 'printvar_{}': {}\n", var.name,
                     dlerror());
                 dlclose(handlep);
-                return;
+                return handlep;
             }
 
             replState.varPrinterAddresses[var.name] = printvar;
         }
     }
+
+    return handlep;
+}
+
+std::string prepareAndSavePrinterOutput(const std::vector<VarDecl> &vars) {
+    if (vars.empty()) {
+        return "";
+    }
+
+    static int i = 0;
+    std::string name = std::format("printerOutput{}", i++);
+
+    printVarsFilePrepare(std::format("{}.cpp", name), vars);
+
+    int buildLibRes = buildPrinterOutputLib(name);
+
+    if (buildLibRes != 0) {
+        return "";
+    }
+
+    return name;
 }
 
 void savePrintAllVarsLibrary(const std::vector<VarDecl> &vars) {
@@ -536,11 +565,10 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(std::string compiler,
-                                    const std::string &libname,
-                                    const std::vector<std::string> &names,
-                                    const std::string &std)
-    -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(
+    std::string compiler, const std::string &libname,
+    const std::vector<std::string> &names,
+    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -637,19 +665,39 @@ void resolveSymbolOffsetsFromLibraryFile(
     }
 
     auto libraryPath = execution::getGlobalExecutionState().getLastLibrary();
+
     auto symbolOffsets =
         execution::SymbolResolver::resolveSymbolOffsetsFromLibraryFile(
             functions, libraryPath);
 
-    // Adicionar offsets ao execution state
-    for (const auto &[symbol, offset] : symbolOffsets) {
-        execution::getGlobalExecutionState().addSymbolToResolve(symbol, offset);
+    for (const auto &[name, offset] : symbolOffsets) {
+        execution::getGlobalExecutionState().addSymbolToResolve(name, offset);
     }
 }
 
-auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
-                                 std::vector<VarDecl> &&vars) -> EvalResult {
+void resolveSymbolOffsetsFromLib(
+    const std::unordered_map<std::string, std::string> &functions,
+    const std::vector<utility::SymbolDef> &symbols) {
+    if (functions.empty()) {
+        return;
+    }
+
+    // Adicionar offsets ao execution state
+    for (const auto &data : symbols) {
+        execution::getGlobalExecutionState().addSymbolToResolve(data.nativeName,
+                                                                data.address);
+    }
+}
+
+auto prepareWrapperAndLoadCodeLib(
+    const CompilerCodeCfg &cfg, std::vector<VarDecl> &&vars,
+    std::vector<utility::SymbolDef> symbols) -> EvalResult {
     std::unordered_map<std::string, std::string> functions;
+
+    auto asyncPrepare = std::async(std::launch::async, [&]() {
+        // Preparar print functions em background
+        return prepareAndSavePrinterOutput(vars);
+    });
 
     bool wrapperCreated =
         prepareFunctionWrapper(cfg.repl_name, vars, functions);
@@ -679,7 +727,7 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
     auto libraryPath = std::format("./lib{}.so", cfg.repl_name);
     execution::getGlobalExecutionState().setLastLibrary(libraryPath);
 
-    resolveSymbolOffsetsFromLibraryFile(functions);
+    resolveSymbolOffsetsFromLib(functions, symbols);
 
     // Inicializar configuração global para trampolines
     execution::getGlobalExecutionState().initializeWrapperConfig();
@@ -705,21 +753,29 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
                      load_end - load_start)
                      .count()
               << "us" << std::endl;
+    auto printerName = asyncPrepare.get();
 
     auto eval = [functions = std::move(functions), handlewp = handlewp,
-                 handle = handle, vars = std::move(vars)]() mutable {
+                 handle = handle, vars = std::move(vars),
+                 printerName = std::move(printerName)]() mutable {
         auto asyncFill = std::async(std::launch::async, [&]() {
             // Preencher ponteiros de funções wrapper em background
             fillWrapperPtrs(functions, handlewp, handle);
         });
 
-        auto asyncPrepare = std::async(std::launch::async, [&]() {
-            // Preparar print functions em background
-            printPrepareAllSave(vars);
+        auto loadPrinter = std::async(std::launch::async, [&]() {
+            // Carregar biblioteca de print em background
+            if (printerName.empty()) {
+                return;
+            }
+            auto handlep = loadPrinterForVars(printerName, vars);
+            if (!handlep) {
+                std::cerr << "Failed to load printer library\n";
+            }
         });
 
         asyncFill.get();
-        asyncPrepare.get();
+        loadPrinter.get();
 
         void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
         if (execv || (execv = (void (*)())dlsym(handle, "exec"))) {
@@ -905,22 +961,27 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
 
     auto end = std::chrono::steady_clock::now();
 
-    {
-        auto vars2 = utility::getBuiltFileDecls(
-            std::format("./lib{}.so", cfg.repl_name));
+    auto alldecls =
+        utility::getAllBuiltFileDecls(std::format("./lib{}.so", cfg.repl_name));
 
-        // add only if it does not exist
-        for (const auto &var : vars2) {
-            if (std::find_if(vars.begin(), vars.end(),
-                             [&](const VarDecl &varInst) {
-                                 return varInst.mangledName == var.mangledName;
-                             }) == vars.end()) {
-                if (verbosityLevel >= 2) {
-                    std::cout << __FILE__ << ":" << __LINE__
-                              << " added: " << var.name << std::endl;
-                }
-                vars.push_back(var);
+    for (const auto &decl : alldecls) {
+        if (decl.libSection != 'T') {
+            continue;
+        }
+
+        if (std::find_if(vars.begin(), vars.end(), [&](const VarDecl &varInst) {
+                return varInst.mangledName == decl.nativeName;
+            }) == vars.end()) {
+            VarDecl var{.name = decl.nativeName,
+                        .mangledName = decl.nativeName,
+                        .kind = "FunctionDecl"};
+            if (verbosityLevel >= 2) {
+                std::cout << __FILE__ << ":" << __LINE__
+                          << " added from alldecls: " << var.name
+                          << " kind: " << var.kind << std::endl;
             }
+
+            vars.emplace_back(std::move(var));
         }
     }
 
@@ -932,7 +993,8 @@ auto compileAndRunCode(CompilerCodeCfg &&cfg) -> EvalResult {
                   << "ms" << std::endl;
     }
 
-    return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
+    return prepareWrapperAndLoadCodeLib(cfg, std::move(vars),
+                                        std::move(alldecls));
 }
 
 // Função para identificar se o código é uma definição ou código executável
@@ -1456,7 +1518,11 @@ auto compileAndRunCodeCustom(
                      .count()
               << "ms" << std::endl;
 
-    return prepareWraperAndLoadCodeLib(cfg, std::move(vars));
+    auto alldecls =
+        utility::getAllBuiltFileDecls(std::format("./lib{}.so", cfg.repl_name));
+
+    return prepareWrapperAndLoadCodeLib(cfg, std::move(vars),
+                                        std::move(alldecls));
 }
 
 int ctrlcounter = 0;

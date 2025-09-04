@@ -1,5 +1,6 @@
 #pragma once
 
+#include "utility/library_introspection.hpp"
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -93,6 +94,10 @@ class SymbolResolver {
     resolveSymbolOffsetsFromLibraryFile(
         const std::unordered_map<std::string, std::string> &functions,
         const std::string &libraryPath);
+
+    static std::unordered_map<std::string, uintptr_t> resolveSymbolOffsets(
+        const std::unordered_map<std::string, std::string> &functions,
+        const std::vector<utility::SymbolDef> &defs);
 
     /**
      * @brief Callback para resolução dinâmica de símbolos

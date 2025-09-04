@@ -277,6 +277,24 @@ SymbolResolver::resolveSymbolOffsetsFromLibraryFile(
     return symbolOffsets;
 }
 
+std::unordered_map<std::string, uintptr_t> SymbolResolver::resolveSymbolOffsets(
+    const std::unordered_map<std::string, std::string> &functions,
+    const std::vector<utility::SymbolDef> &defs) {
+    std::unordered_map<std::string, uintptr_t> symbolOffsets;
+
+    if (functions.empty()) {
+        return symbolOffsets;
+    }
+
+    for (const auto &def : defs) {
+        if (functions.contains(def.nativeName)) {
+            symbolOffsets[def.nativeName] = def.address;
+        }
+    }
+
+    return symbolOffsets;
+}
+
 void SymbolResolver::loadSymbolToPtr(void **ptr, const char *name,
                                      const WrapperConfig &config) {
     std::cout << __LINE__ << ": Function segfaulted: " << name

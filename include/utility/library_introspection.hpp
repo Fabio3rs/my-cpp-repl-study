@@ -8,12 +8,20 @@ struct VarDecl;
 
 namespace utility {
 
+struct SymbolDef {
+    std::string nativeName; // mangled (nm sem -C)
+    uintptr_t address{};    // st_value (offset no DSO)
+    char libSection{};      // 'T','t','W','w','D','d','B','b','R','r',...
+};
+
 /**
  * @brief Extracts function declarations from a built library using nm command
  * @param path Path to the library file
  * @return Vector of VarDecl representing the function symbols found
  */
 auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl>;
+
+auto getAllBuiltFileDecls(const std::string &path) -> std::vector<SymbolDef>;
 
 /**
  * @brief Gets the start address of a library in memory

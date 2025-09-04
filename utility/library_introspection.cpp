@@ -42,6 +42,81 @@ auto getBuiltFileDecls(const std::string &path) -> std::vector<VarDecl> {
     return vars;
 }
 
+static bool parse_nm_line(std::string_view line, uintptr_t &addrOut,
+                          char &typeOut, std::string &nameOut) {
+    size_t i = 0, n = line.size();
+    auto skip = [&] {
+        while (i < n && (line[i] == ' ' || line[i] == '\t'))
+            ++i;
+    };
+    auto take = [&](std::string &tok) {
+        size_t b = i;
+        while (i < n && !(line[i] == ' ' || line[i] == '\t' ||
+                          line[i] == '\r' || line[i] == '\n'))
+            ++i;
+        tok.assign(line.substr(b, i - b));
+    };
+
+    skip();
+    std::string addrTok;
+    take(addrTok);
+    if (addrTok.empty())
+        return false;
+
+    skip();
+    if (i >= n)
+        return false;
+    typeOut = line[i++]; // normalmente um único char (ex.: 'T')
+    // tolera variantes com espaço a mais, ex.: " T "
+    // (se houver 2 chars e o segundo não for espaço, você ainda cai no próximo
+    // skip)
+
+    skip();
+    std::string nameTok;
+    take(nameTok);
+    if (nameTok.empty())
+        return false;
+
+    char *endp = nullptr;
+    unsigned long long v = std::strtoull(addrTok.c_str(), &endp, 16);
+    addrOut = static_cast<uintptr_t>(v);
+    nameOut = std::move(nameTok);
+    return true;
+}
+
+auto getAllBuiltFileDecls(const std::string &path) -> std::vector<SymbolDef> {
+    std::vector<SymbolDef> symbols;
+    symbols.reserve(16384); // reserva inicial razoável
+
+    // Sem -C para manter mangled (compatível com dlsym/filtros existentes)
+    const auto cmd = std::format("nm -D --defined-only {}", path);
+    auto pipe = utility::make_popen(cmd, "r");
+    if (!pipe) {
+        perror("popen");
+        return symbols;
+    }
+
+    char buf[4096];
+    std::string line;
+    line.reserve(sizeof(buf));
+
+    // fgets já sinaliza EOF; não precisa checar feof no while
+    while (std::fgets(buf, sizeof(buf), pipe.get())) {
+        line.assign(buf);
+
+        uintptr_t addr = 0;
+        char type = '?';
+        std::string name;
+        if (!parse_nm_line(line, addr, type, name)) {
+            continue;
+        }
+        symbols.push_back(SymbolDef{.nativeName = std::move(name),
+                                    .address = addr,
+                                    .libSection = type});
+    }
+    return symbols;
+}
+
 auto getLibraryStartAddress(const char *library_name) -> uintptr_t {
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
@@ -80,8 +155,8 @@ auto getLibraryStartAddress(const char *library_name) -> uintptr_t {
     return start_address;
 }
 
-auto getSymbolAddress(const char *library_name, const char *symbol_name)
-    -> uintptr_t {
+auto getSymbolAddress(const char *library_name,
+                      const char *symbol_name) -> uintptr_t {
     char line[MAX_LINE_LENGTH]{};
     char library_path[MAX_LINE_LENGTH]{};
     uintptr_t start_address{}, end_address{};
