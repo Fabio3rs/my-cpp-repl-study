@@ -26,14 +26,21 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 4. **Handles crashes gracefully** by converting hardware signals into manageable C++ exceptions
 5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
 
+<<<<<<< HEAD
 **Performance Achievements (Measured in Ubuntu 24.04)**:
 - **Fast compilation** (80-95ms average) through optimized parallel pipeline and LLVM linker
+=======
+**Performance Snapshot (Ubuntu 24.04, Clang 18)**:
+- **Single-source compile**: ~90–96 ms per evaluation (parallel pipeline + PCH)
+- **Load/execution overhead**: **~1μs–48ms** per executable block (highly variable `load time`)
+- **Script via STDIN (example below)**: total observed time ~2.6–3.0 s (cpprepl) vs **~0.21–0.22 s** (clang-repl-18)
+>>>>>>> 76893e7 (Ajusts comparison README)
 - **Simple completion** with basic symbol and keyword matching
-- **0.8s startup time** with intelligent caching systems
-- **150MB peak memory usage** during complex compilations
-- **Linear scaling** with available CPU cores for multi-file processing
+- **Note**: In `clang-repl-18`, the **cold start** (initialization/JIT) typically takes **~100–120 ms**; the remainder is I/O and snippet execution.
 
 **Alpha Status**: With **7,500+ lines** of tested code and **118/118 tests passing (100% success rate)**, the system demonstrates stable core functionality while some advanced features remain in development for v2.0.
+
+> **⚠️ Performance Disclaimer**: All performance measurements are system-dependent and may vary significantly based on hardware specifications, compiler versions, system load, and configuration. The numbers presented reflect specific test conditions on Ubuntu 24.04 with Clang 18 and should be used as relative comparisons rather than absolute benchmarks.
 
 ## ✅ **Working Features (v1.5-alpha)**
 
@@ -155,13 +162,22 @@ cpprepl/
 
 * In case of any imprecise information, please open an issue or PR to fix it.
 
-| System             | Compilation Model  | Performance | Error Handling                    | Hot Reload      | Backtrace Quality       | Completion | Open Source | Platform |
-| ------------------ | ------------------ | ----------- | --------------------------------- | --------------- | ----------------------- | ---------- | ----------- | -------- |
-| **cpprepl (this)** | Native, shared lib | **80-95ms avg** | Signal→Exception + full backtrace | Per function    | OS-level, source-mapped | **Clang Semantic (v2.0)** | Production   | Linux    |
-| clang-repl         | LLVM JIT IR        | ~100ms      | Managed (JIT abort)               | No              | IR-level                | Basic      | Yes         | Multi    |
-| cling              | JIT/Interpreter    | ~80ms       | Managed (soft error)              | No              | Partial                 | Basic      | Yes         | Multi    |
-| Visual Studio HR   | Compiler-level     | ~200ms      | Patch revert / rollback           | Per instruction | Compiler map            | IntelliSense | No          | Windows  |
-| Python REPL        | Bytecode           | ~5ms        | Exception-based                   | Per function    | High (source)           | Advanced   | Yes         | Multi    |
+| System             | Compilation Model  | Performance (single eval)                         | Performance (script via pipe*) | Error Handling                    | Hot Reload   | Backtrace Quality       | Completion | Open Source | Platform |
+| ------------------ | ------------------ | -------------------------------------------------- | ------------------------------- | --------------------------------- | ------------ | ----------------------- | ---------- | ----------- | -------- |
+| **cpprepl (this)** | Native, shared lib | ~90–96 ms (compilation) + **~1μs–48ms** (loading) | **~2.6–3.0 s** (example script) | Signal→Exception + full backtrace | Per function | OS-level, source-mapped | (basic; LSP in roadmap) | Alpha   | Linux    |
+| clang-repl-18      | LLVM JIT IR        | **~100–120 ms cold start**; short evals <200 ms | **~0.21–0.22 s** (same script) | Managed (JIT abort)               | No           | IR-level                | Basic      | Yes         | Multi    |
+| cling              | JIT/Interpreter    | ~80–150 ms                                         | depends on script               | Managed (soft error)              | No           | Partial                 | Basic      | Yes         | Multi    |
+| Visual Studio HR   | Compiler-level     | ~200ms                                             | n/a                             | Patch revert / rollback           | Per instruction | Compiler map            | IntelliSense | No          | Windows  |
+| Python REPL        | Bytecode           | ~5ms                                               | ~50-100ms                       | Exception-based                   | Per function | High (source)           | Advanced   | Yes         | Multi    |
+
+\* Example script: see "How We Measure" section below.
+
+> **🔄 Performance Trade-offs**: This comparison highlights fundamental architectural differences:
+> - **Native Compilation (cpprepl)**: Higher per-evaluation overhead (~90-144ms total) but **full native execution speed** and complete debugging capabilities
+> - **JIT Systems (clang-repl, cling)**: Lower per-evaluation overhead but **interpreted/JIT execution** with limited debugging
+> - **Managed Languages (Python)**: Minimal evaluation overhead but **bytecode execution** performance
+>
+> Choose based on your priorities: **native performance + debugging** vs **fast iteration** vs **simple deployment**.
 
 
 ## Core Architecture and Techniques
@@ -251,9 +267,11 @@ The system employs a **compile-then-link** approach rather than interpretation:
   - **Thread Configuration**: Auto-detects `hardware_concurrency()` with configurable thread limits
 
 **Performance Results:**
-- **Single File Compilation**: **93ms average** (measured in Ubuntu 24.04 environment)
+- **Single File Compilation**: **90-96ms average** (measured in Ubuntu 24.04 environment)
 - **Multi-file Projects**: Linear scaling with number of CPU cores
 - **Zero Breaking Changes**: Full backward compatibility maintained
+
+> **📊 Benchmark Environment**: All measurements performed on Ubuntu 24.04 with Clang 18. Performance may vary significantly on different systems, architectures, and configurations. Use these numbers for relative comparison only.
 
 Example compilation command:
 ```cpp
@@ -644,7 +662,33 @@ The project demonstrates several low-level systems programming concepts:
 - **Register State Preservation**: Careful assembly programming to maintain calling conventions
 - **ABI Interception**: Hooks into C++ runtime for backtrace embedding
 
-## Building and Usage
+### How We Measure
+
+The numbers above come from executions like:
+
+```bash
+# Cold start minimum (initialization/JIT):
+echo -e '#include <iostream>\n' | time clang-repl-18
+# Typical: ~0.21–0.22 s elapsed for this minimal snippet,
+# of which ~100–120 ms corresponds to initialization; the rest is I/O and finalization.
+```
+
+```bash
+echo -e '#include <iostream>\nstd::cout << "Hello world!\\n";\nint a = 10;\na+=1;\n++a;\na++;\n' | time --verbose ./cpprepl
+echo -e '#include <iostream>\nstd::cout << "Hello world!\\n";\nint a = 10;\na+=1;\n++a;\na++;\n' | time --verbose clang-repl-18
+```
+
+> **Note**: `cpprepl` recompiles/analyzes and loads each block, and the first interaction may regenerate the PCH. This explains why the "time per evaluation" (~90–96 ms compilation + ~1μs–48ms loading) appears reasonable, but the total script time via pipe is significantly higher than `clang-repl-18`. **Load times are highly variable**: cached executions complete in microseconds, while fresh library loads with complex symbol tables can take up to 48ms.
+>
+> For `clang-repl-18`, the difference between **cold start (~100–120 ms)** and **end-to-end time (~0.21–0.22 s)** is mostly I/O (stdin/stdout) and process teardown.
+
+> **⚠️ System Dependencies**: These benchmarks reflect specific hardware and software configurations. Actual performance will vary based on:
+> - **CPU Architecture**: x86_64, ARM64, core count, and clock speeds
+> - **Memory**: Available RAM, swap configuration, and memory bandwidth
+> - **Storage**: SSD vs HDD, filesystem type, and I/O load
+> - **Compiler Versions**: Different Clang/GCC versions may show significant variance
+> - **System Load**: Background processes and resource contention
+> - **OS Configuration**: Kernel settings, security features, and driver versions
 
 ## Building and Usage
 
@@ -793,10 +837,12 @@ which gdb         # For instruction analysis
 export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ```
 
-## Performance Characteristics (v2.0.0)
+## Performance Characteristics (v1.5-alpha)
+
+> **⚠️ Performance Variability**: All performance metrics are highly system-dependent. Results will vary significantly based on hardware configuration, compiler versions, system load, and environmental factors. Use these measurements as relative performance indicators rather than absolute benchmarks.
 
 ### Compilation Performance ✅ **VERIFIED FUNCTIONALITY**
-- **Single File Compilation**: **80-95ms average** (measured in Ubuntu 24.04 environment)
+- **Single File Compilation**: **90-96ms average** (measured in Ubuntu 24.04 environment)
 - **Dual-Level Parallelism**:
   - **Inter-file**: Multiple source files compiled simultaneously  
   - **Intra-file**: AST analysis + object compilation run in parallel using `std::async`
@@ -820,17 +866,11 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 ### Runtime Performance ✅ **NATIVE EXECUTION**
 - **Native Speed**: Compiled code runs at full native performance (no interpretation)
 - **Symbol Resolution**: ~1-10μs per function call through optimized assembly trampolines
+- **Library Loading**: **Highly variable ~1μs–48ms** depending on library size, symbol count, and system state
 - **Startup Time**: ~0.8s (fast initialization)
 - **Memory Layout**: Standard process memory model with shared library segments
 - **Peak Memory**: ~150MB during complex compilations with includes
 - **Smart Caching**: Automatic detection and reuse of identical command patterns
-
-### Test Results ✅ **PRODUCTION QUALITY**
-- **Test Suite**: 118/118 tests passing (100% success rate)
-- **Comprehensive Coverage**: All compilation pipeline, signal handling, and core functionality tested
-- **Memory Management**: No memory leaks detected in test runs
-- **Concurrent Safety**: Thread-safe symbol resolution verified
-- **Production Ready**: All critical paths validated through automated testing
 
 ## Use Cases and Applications
 
@@ -920,3 +960,7 @@ This implementation represents a groundbreaking approach to C++ REPL design that
 The innovative signal-to-exception translation system, combined with embedded backtrace generation, represents a significant advancement in interactive development tool safety and debugging capabilities. The architecture provides a foundation for understanding how robust dynamic compilation systems can be built from first principles, offering insights into the trade-offs between compilation time, execution performance, and error recovery in interactive development environments.
 
 The project's practical applications, demonstrated through the self-editing text editor with comprehensive crash recovery, showcase the potential for creating development environments where code modification and execution happen seamlessly in real-time while maintaining system stability even in the presence of user code errors. This represents a significant advancement in interactive C++ development tools, providing both the performance benefits of native compilation and the safety features typically associated with managed environments.
+
+> **🎯 Key Trade-offs Summary**: This REPL prioritizes **native execution performance** and **comprehensive debugging** over **fast iteration**. While evaluation takes longer than JIT-based solutions (~90-144ms vs ~100-120ms), users benefit from full-speed native code execution, complete debugging capabilities, and crash recovery. **Load time variability** (microseconds for cached vs ~48ms for complex fresh loads) reflects the dynamic library approach. The architecture choice reflects the principle that compilation overhead is acceptable when balanced against the advantages of native performance and debugging fidelity.
+>
+> **📈 Performance Context**: The performance characteristics documented here represent measurements on specific hardware and software configurations. Real-world performance will vary based on system specifications, workload characteristics, and environmental factors. Users should benchmark on their target systems for production planning.
