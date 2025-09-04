@@ -26,7 +26,7 @@ static std::mutex contextWriteMutex;
  * duração do REPL.
  */
 std::string AstContext::outputHeader_;
-std::unordered_set<std::string> AstContext::includedFiles_;
+std::unordered_map<std::string, bool> AstContext::includedFiles_;
 std::vector<CodeTracking> AstContext::codeSnippets_;
 
 AstContext::AstContext() {
@@ -36,14 +36,16 @@ AstContext::AstContext() {
     }
 }
 
-bool AstContext::addInclude(const std::string &includePath) {
+bool AstContext::addInclude(const std::string &includePath,
+                            bool systemInclude) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
-        includedFiles_.insert(includePath);
+        includedFiles_.insert({includePath, systemInclude});
 
         // Adicionando tracking para o outputHeader_
         std::string includeDeclaration =
-            std::format("#include \"{}\"\n", includePath);
+            systemInclude ? std::format("#include <{}>\n", includePath)
+                          : std::format("#include \"{}\"\n", includePath);
         outputHeader_ += includeDeclaration;
 
         // Criar CodeTracking correspondente
@@ -101,9 +103,10 @@ bool AstContext::isFileIncluded(const std::string &filePath) const {
     return includedFiles_.find(filePath) != includedFiles_.end();
 }
 
-void AstContext::markFileIncluded(const std::string &filePath) {
+void AstContext::markFileIncluded(const std::string &filePath,
+                                  bool systemInclude) {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
-    includedFiles_.insert(filePath);
+    includedFiles_.insert({filePath, systemInclude});
 }
 
 bool AstContext::hasHeaderChanged() const {

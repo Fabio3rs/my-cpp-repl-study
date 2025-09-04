@@ -33,6 +33,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <libnotify/notify.h>
 #include <mutex>
 #include <readline/history.h>
@@ -267,11 +268,12 @@ static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
 
 int onlyBuildLib(std::string compiler, const std::string &name,
                  std::string ext = ".cpp", std::string std = "gnu++20",
-                 std::string_view extra_args = {}) {
+                 std::string_view extra_args = {},
+                 std::string_view pchFile = {}) {
     initCompilerService();
 
-    auto result =
-        compilerService->buildLibraryOnly(compiler, name, ext, std, extra_args);
+    auto result = compilerService->buildLibraryOnly(compiler, name, ext, std,
+                                                    extra_args, pchFile);
 
     if (!result) {
         std::cerr << std::format("Build failed with error code: {}\n",
@@ -369,7 +371,9 @@ void printPrepareAllSave(const std::vector<VarDecl> &vars) {
 
     printerOutput.close();
 
-    int buildLibRes = onlyBuildLib("clang++", name);
+    int buildLibRes = onlyBuildLib("clang++", name, ".cpp", "gnu++20",
+                                   buildSettings.getExtraLinkerFlags(),
+                                   "-include printerOutput.hpp");
 
     if (buildLibRes != 0) {
         std::cerr << std::format("buildLibRes != 0: {}\n", name);
@@ -532,10 +536,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -703,9 +708,18 @@ auto prepareWraperAndLoadCodeLib(const CompilerCodeCfg &cfg,
 
     auto eval = [functions = std::move(functions), handlewp = handlewp,
                  handle = handle, vars = std::move(vars)]() mutable {
-        fillWrapperPtrs(functions, handlewp, handle);
+        auto asyncFill = std::async(std::launch::async, [&]() {
+            // Preencher ponteiros de funções wrapper em background
+            fillWrapperPtrs(functions, handlewp, handle);
+        });
 
-        printPrepareAllSave(vars);
+        auto asyncPrepare = std::async(std::launch::async, [&]() {
+            // Preparar print functions em background
+            printPrepareAllSave(vars);
+        });
+
+        asyncFill.get();
+        asyncPrepare.get();
 
         void (*execv)() = (void (*)())dlsym(handle, "_Z4execv");
         if (execv || (execv = (void (*)())dlsym(handle, "exec"))) {
@@ -1088,16 +1102,21 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                     }
                 }
 
+                bool isSystemHeader = line.find('<') != std::string::npos &&
+                                      line.find('>') != std::string::npos;
+
                 if (p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp") {
                     // TODO: Implementar recompilação baseada em contexto AST
-                    replState.shouldRecompilePrecompiledHeader =
-                        analysis::AstContext::addInclude(p.string());
+                    bool addedHeader = analysis::AstContext::addInclude(
+                        p.string(), isSystemHeader);
 
-                    if (replState.shouldRecompilePrecompiledHeader) {
+                    /*if (addedHeader) {
                         analysis::AstContext::staticSaveHeaderToFile(
                             "decl_amalgama.hpp");
-                    }
+                    }*/
+
+                    replState.shouldRecompilePrecompiledHeader = addedHeader;
 
                     if (replState.shouldRecompilePrecompiledHeader &&
                         verbosityLevel >= 2) {
@@ -1158,6 +1177,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         std::fstream printerOutput("printerOutput.cpp",
                                    std::ios::out | std::ios::trunc);
 
+        printerOutput << "#include \"printerOutput.hpp\"\n\n" << std::endl;
         printerOutput << "#include \"decl_amalgama.hpp\"\n\n" << std::endl;
 
         printerOutput << "void printall() {\n";
@@ -1389,7 +1409,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
 
     auto evalRes = compileAndRunCode(std::move(cfg));
 
-    if (evalRes.success) {
+    if (evalRes.success && evalRes.exec) {
         replState.evalResults.insert_or_assign(line, evalRes);
         if (verbosityLevel >= 2) {
             std::cout << "✅ Command executed successfully and cached\n";
@@ -1575,6 +1595,9 @@ int ext_build_precompiledheader() { return build_precompiledheader(); }
 void initRepl() {
     writeHeaderPrintOverloads();
     build_precompiledheader();
+
+    compilerService->buildCustomPCH("clang++", "printerOutput.hpp",
+                                    "printerOutput.hpp.pch");
 
     // Inicializar completion com estado atual do REPL
     completionScope =

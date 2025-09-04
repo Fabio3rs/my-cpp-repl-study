@@ -69,6 +69,7 @@ TEST_F(ReplTests, Reassignment) {
 
 // Test: String assignment
 TEST_F(ReplTests, StringAssignment) {
+    ASSERT_TRUE(extExecRepl("#include <string>"));
     ASSERT_TRUE(extExecRepl("std::string s = \"hello\";"));
     ASSERT_EQ(std::string("hello"),
               std::any_cast<std::string>(getResultRepl("s")));

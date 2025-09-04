@@ -226,9 +226,10 @@ std::string CompilerService::formatErrorLine(const std::string &line) const {
 
 CompilerResult<int> CompilerService::buildLibraryOnly(
     const std::string &compiler, const std::string &name,
-    const std::string &ext, const std::string &std,
-    std::string_view extra_args) const {
-    std::string includePrecompiledHeader = getPrecompiledHeaderFlag(ext);
+    const std::string &ext, const std::string &std, std::string_view extra_args,
+    std::string_view pchFile) const {
+    std::string includePrecompiledHeader =
+        pchFile.empty() ? getPrecompiledHeaderFlag(ext) : std::string(pchFile);
 
     auto cmd =
         std::format("{} -std={} -shared {} {} {} -g -Wl,--export-dynamic -fPIC "
@@ -329,11 +330,18 @@ CompilerResult<void> CompilerService::buildPrecompiledHeader(
         precompHeader
             << "extern int (*bootstrapProgram)(int argc, char **argv);\n";
         precompHeader << "extern std::any lastReplResult;\n";
-        precompHeader << "#include \"printerOutput.hpp\"\n\n" << std::endl;
 
         // Se temos um contexto, usar os includes dele
-        if (contextToUse) {
+        /*if (contextToUse) {
             precompHeader << contextToUse->getOutputHeader() << std::endl;
+        }*/
+
+        for (const auto &inc : analysis::AstContext::getIncludedFiles()) {
+            if (inc.second) {
+                precompHeader << std::format("#include <{}>\n", inc.first);
+            } else {
+                precompHeader << std::format("#include \"{}\"\n", inc.first);
+            }
         }
 
         precompHeader.flush();
@@ -356,6 +364,34 @@ CompilerResult<void> CompilerService::buildPrecompiledHeader(
         result.error = CompilerError::PrecompiledHeaderFailed;
         return result;
     }
+
+    return result;
+}
+
+CompilerResult<void> CompilerService::buildCustomPCH(
+    const std::string &compiler, const std::string &header,
+    const std::string &outputPchFile,
+    std::shared_ptr<analysis::AstContext> context) const {
+    CompilerResult<void> result;
+
+    if (!std::filesystem::exists(header)) {
+        std::cerr << std::format("Header file '{}' does not exist.\n", header);
+        result.error = CompilerError::PrecompiledHeaderFailed;
+        return result;
+    }
+
+    std::string cmd =
+        std::format("{}{} {} -fPIC -x c++-header -std=gnu++20 -o {} {}",
+                    compiler, getPreprocessorDefinitionsStr(),
+                    getIncludeDirectoriesStr(), outputPchFile, header);
+
+    auto cmdResult = executeCommand(cmd);
+    if (!cmdResult) {
+        result.error = CompilerError::PrecompiledHeaderFailed;
+        return result;
+    }
+
+    result.error = CompilerError::Success;
 
     return result;
 }
@@ -432,6 +468,15 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
                            compiler, ppdefs, includes, name, obj);
     };
 
+    auto compileAndLinkCmdFor = [&](const std::string &name,
+                                    const std::string &obj) {
+        auto linkerFlags = buildSettings_->getExtraLinkerFlags();
+        return std::format(
+            "{}{} {} -std=gnu++20 -shared -include "
+            "precompiledheader.hpp -g -Wl,--export-dynamic {} -fPIC {} -o {}",
+            compiler, ppdefs, includes, linkerFlags, name, obj);
+    };
+
     auto analyzeAst =
         [&](const std::string &jsonFile, const std::string &srcName,
             std::vector<VarDecl> &outVars, bool &outHeaderChanged) -> int {
@@ -443,7 +488,8 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         return ares;
     };
 
-    auto processOne = [&](const std::string &name) -> SourceProcessResult {
+    auto processOne = [&](const std::string &name,
+                          bool buildAndLink = false) -> SourceProcessResult {
         SourceProcessResult r;
         r.sourceFile = name;
         if (name.empty()) {
@@ -451,10 +497,17 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         }
 
         r.purefilename = pureName(name);
-        r.objectName = std::format("{}.o", r.purefilename);
+
+        if (buildAndLink) {
+            r.objectName = std::format("lib{}.so", r.purefilename);
+        } else {
+            r.objectName = std::format("{}.o", r.purefilename);
+        }
 
         const std::string astCmd = astCmdFor(name, r.purefilename);
-        const std::string ccCmd = compileCmdFor(name, r.objectName);
+        const std::string ccCmd = buildAndLink
+                                      ? compileAndLinkCmdFor(name, r.objectName)
+                                      : compileCmdFor(name, r.objectName);
 
         try {
             // AST + compile em paralelo
@@ -516,9 +569,11 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
     };
 
     // Execução --------------------------------------------------------------
+    bool linked = false;
 
     if (sources.size() == 1) {
-        auto r = processOne(sources.front());
+        linked = true;
+        auto r = processOne(sources.front(), linked);
         if (r.errorCode != 0) {
             handleErrorAndBail(r);
         } else {
@@ -562,17 +617,19 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         return result;
     }
 
-    auto linkerFlags = buildSettings_->getExtraLinkerFlags();
+    if (!linked) {
+        auto linkerFlags = buildSettings_->getExtraLinkerFlags();
 
-    // Link (sequencial)
-    const std::string linkCmd = std::format(
-        "{} {} -shared -g -Wl,--export-dynamic {} {} -o lib{}.so", compiler,
-        linkerFlags, namesConcated, getLinkLibrariesStr(), libname);
+        // Link (sequencial)
+        const std::string linkCmd = std::format(
+            "{} {} -shared -g -Wl,--export-dynamic {} {} -o lib{}.so", compiler,
+            linkerFlags, namesConcated, getLinkLibrariesStr(), libname);
 
-    if (auto linkRes = executeCommand(linkCmd); !linkRes) {
-        result.error = CompilerError::LinkingFailed;
-        result.value.returnCode = linkRes.value;
-        return result;
+        if (auto linkRes = executeCommand(linkCmd); !linkRes) {
+            result.error = CompilerError::LinkingFailed;
+            result.value.returnCode = linkRes.value;
+            return result;
+        }
     }
 
     const auto t1 = std::chrono::system_clock::now();

@@ -11,7 +11,8 @@
 // Forward declarations for functions defined in repl.cpp
 extern int onlyBuildLib(std::string compiler, const std::string &name,
                         std::string ext = ".cpp", std::string std = "gnu++20",
-                        std::string_view extra_args = {});
+                        std::string_view extra_args = {},
+                        std::string_view pchFile = {});
 
 namespace execution {
 

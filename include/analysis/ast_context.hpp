@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -54,9 +55,11 @@ class AstContext {
     /**
      * @brief Adiciona um include ao header de saída
      * @param includePath Caminho do arquivo de include
+     * @param systemInclude Indica se é um include de sistema (<> vs "")
      * @return true se o include foi adicionado, false se já existia
      */
-    static bool addInclude(const std::string &includePath);
+    static bool addInclude(const std::string &includePath,
+                           bool systemInclude = false);
 
     /**
      * @brief Adiciona uma declaração extern ao header de saída
@@ -81,8 +84,10 @@ class AstContext {
     /**
      * @brief Marca um arquivo como incluído
      * @param filePath Caminho do arquivo
+     * @param systemInclude Indica se é um include de sistema (<> vs "")
      */
-    void markFileIncluded(const std::string &filePath);
+    void markFileIncluded(const std::string &filePath,
+                          bool systemInclude = false);
 
     /**
      * @brief Obtém o header de saída completo
@@ -112,6 +117,10 @@ class AstContext {
 
     static void regenerateOutputHeaderWithSnippets();
 
+    static const std::unordered_map<std::string, bool> &getIncludedFiles() {
+        return includedFiles_;
+    }
+
   private:
     /**
      * @brief Header de declarações com duração estática
@@ -124,7 +133,7 @@ class AstContext {
      * codeSnippets_
      */
     static std::string outputHeader_;
-    static std::unordered_set<std::string> includedFiles_;
+    static std::unordered_map<std::string, bool> includedFiles_;
     static std::vector<CodeTracking> codeSnippets_;
     mutable size_t lastHeaderSize_ = 0;
 

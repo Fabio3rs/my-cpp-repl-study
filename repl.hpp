@@ -18,7 +18,7 @@ struct EvalResult {
     std::string libpath;
     std::function<void()> exec;
     void *handle{};
-    bool success{};
+    bool success{false};
 
     operator bool() const { return success; }
 };

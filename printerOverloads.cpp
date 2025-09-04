@@ -1,6 +1,38 @@
 #include "printerOverloads.hpp"
 #include "stdafx.hpp"
 
+void printdata(std::string_view str, std::string_view name,
+               std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << str << std::endl;
+}
+
+void printdata(const std::mutex &mtx, std::string_view name,
+               std::string_view type) {
+    std::cout << " >> " << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << "Mutex" << std::endl;
+}
+
+void printdata(int val, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << val << std::endl;
+}
+
+void printdata(double val, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << val << std::endl;
+}
+
+void printdata(float val, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << val << std::endl;
+}
+
+void printdata(unsigned int val, std::string_view name, std::string_view type) {
+    std::cout << " >> " << type << (name.empty() ? "" : " ")
+              << (name.empty() ? "" : name) << ": " << val << std::endl;
+}
+
 void writeHeaderPrintOverloads() {
     auto printer = R"cpp(#pragma once
 #include <deque>
@@ -36,17 +68,14 @@ inline void printdata(const std::deque<T> &vect, std::string_view name,
     std::cout << std::endl;
 }
 
-inline void printdata(std::string_view str, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << type << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << ": " << str << std::endl;
-}
-
-inline void printdata(const std::mutex &mtx, std::string_view name,
-                      std::string_view type) {
-    std::cout << " >> " << (name.empty() ? "" : " ")
-              << (name.empty() ? "" : name) << "Mutex" << std::endl;
-}
+void printdata(std::string_view str, std::string_view name,
+               std::string_view type);
+void printdata(const std::mutex &mtx, std::string_view name,
+               std::string_view type);
+void printdata(int val, std::string_view name, std::string_view type);
+void printdata(double val, std::string_view name, std::string_view type);
+void printdata(float val, std::string_view name, std::string_view type);
+void printdata(unsigned int val, std::string_view name, std::string_view type);
 
 template <class T> struct is_printable {
     static constexpr bool value =

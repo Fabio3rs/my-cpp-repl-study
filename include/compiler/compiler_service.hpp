@@ -119,11 +119,12 @@ class CompilerService {
      * @param std C++ standard (default: "gnu++20")
      * @return CompilerResult<int> - System return code or error
      */
-    CompilerResult<int>
-    buildLibraryOnly(const std::string &compiler, const std::string &name,
-                     const std::string &ext = ".cpp",
-                     const std::string &std = "gnu++20",
-                     std::string_view extra_args = {}) const;
+    CompilerResult<int> buildLibraryOnly(const std::string &compiler,
+                                         const std::string &name,
+                                         const std::string &ext = ".cpp",
+                                         const std::string &std = "gnu++20",
+                                         std::string_view extra_args = {},
+                                         std::string_view pchFile = {}) const;
 
     /**
      * @brief Build library with full AST analysis and variable extraction
@@ -154,6 +155,11 @@ class CompilerService {
      */
     CompilerResult<void> buildPrecompiledHeader(
         const std::string &compiler = "clang++",
+        std::shared_ptr<analysis::AstContext> context = nullptr) const;
+
+    CompilerResult<void> buildCustomPCH(
+        const std::string &compiler, const std::string &header,
+        const std::string &outputPchFile,
         std::shared_ptr<analysis::AstContext> context = nullptr) const;
 
     /**
