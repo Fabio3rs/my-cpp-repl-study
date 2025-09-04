@@ -28,6 +28,7 @@ static std::mutex contextWriteMutex;
 std::string AstContext::outputHeader_;
 std::unordered_map<std::string, bool> AstContext::includedFiles_;
 std::vector<CodeTracking> AstContext::codeSnippets_;
+bool AstContext::includesChanged = false;
 
 AstContext::AstContext() {
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
@@ -41,6 +42,7 @@ bool AstContext::addInclude(const std::string &includePath,
     std::scoped_lock<std::mutex> lock(contextWriteMutex);
     if (includedFiles_.find(includePath) == includedFiles_.end()) {
         includedFiles_.insert({includePath, systemInclude});
+        includesChanged = true;
 
         // Adicionando tracking para o outputHeader_
         std::string includeDeclaration =
@@ -434,7 +436,7 @@ int ContextualAstAnalyzer::analyzeASTFromJsonString(
     std::vector<VarDecl> &vars) {
 
     // Debug output
-    {
+    if (::verbosityLevel >= 3) {
         std::fstream debugOutput("debug_output.json",
                                  std::ios::out | std::ios::trunc);
         debugOutput << json << std::endl;

@@ -2,6 +2,7 @@
 #include "../test_helpers/temp_directory_fixture.hpp"
 #include "analysis/ast_context.hpp"
 #include "compiler/compiler_service.hpp"
+#include "repl.hpp"
 
 #include <cstdlib>
 #include <gtest/gtest.h>
@@ -221,7 +222,8 @@ TEST_F(CompilerServiceTest,
 
     // Should succeed with PCH available
     EXPECT_TRUE(result.success())
-        << "Multi-file compilation should succeed with PCH";
+        << "Multi-file compilation should succeed with PCH "
+        << result.value.returnCode;
     if (result.success()) {
         EXPECT_EQ(result.value.returnCode, 0);
         // Variables might be extracted depending on implementation

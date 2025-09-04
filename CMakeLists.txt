@@ -57,8 +57,8 @@ find_package(Clang QUIET)
 # ==============================================================================
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-#  add_compile_options(-fxray-instrument -fxray-instruction-threshold=1 -g)
-#  add_link_options(-fxray-instrument)  # puxa o runtime do XRay automaticamente
+  add_compile_options(-fxray-instrument -fxray-instruction-threshold=1 -g)
+  add_link_options(-fxray-instrument)  # puxa o runtime do XRay automaticamente
 endif()
 
 # Report Clang availability and configuration

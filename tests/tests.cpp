@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <string>
 
+extern int verbosityLevel;
+
 class ReplTests : public ::testing::Test {
   protected:
     void SetUp() override {

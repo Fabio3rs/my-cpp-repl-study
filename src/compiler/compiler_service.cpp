@@ -4,6 +4,7 @@
 #include "analysis/ast_context.hpp"
 #include "analysis/clang_ast_adapter.hpp"
 
+#include "execution/spawn_to_mem_fd.hpp"
 #include "utility/system_exec.hpp"
 #include <algorithm>
 #include <chrono>
@@ -448,16 +449,32 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
         return pos == std::string::npos ? base : base.substr(0, pos);
     };
 
-    auto astCmdFor = [&](const std::string &name, const std::string &pure) {
-        // dump JSON AST + usa PCH (mesmo que seu original)
-        // saída JSON vai para "<pure>.json" e logs para "<pure>.log"
-        return std::format(
-            "{}{} {} -std={} -fcolor-diagnostics -fPIC "
-            "-Xclang -ast-dump=json "
-            "-Xclang -include-pch -Xclang precompiledheader.hpp.pch "
-            "-include precompiledheader.hpp -fsyntax-only {} "
-            "-o lib{}_blank.so > {}.json 2> {}.log",
-            compiler, ppdefs, includes, std, name, pure, pure, pure);
+    auto astCmdArgs = [&](const std::string &name, const std::string &pure) {
+        std::vector<std::string> result;
+        result.reserve(17 + buildSettings_->includeDirectories.size() +
+                       buildSettings_->preprocessorDefinitions.size());
+        result.push_back(compiler);
+        for (const auto &def : buildSettings_->preprocessorDefinitions) {
+            result.push_back("-D" + def);
+        }
+        for (const auto &inc : buildSettings_->includeDirectories) {
+            result.push_back("-I" + inc);
+        }
+
+        result.push_back("-std=" + std);
+        result.push_back("-fcolor-diagnostics");
+        result.push_back("-fPIC");
+        result.push_back("-Xclang");
+        result.push_back("-ast-dump=json");
+        result.push_back("-Xclang");
+        result.push_back("-include-pch");
+        result.push_back("-Xclang");
+        result.push_back("precompiledheader.hpp.pch");
+        result.push_back("-include");
+        result.push_back("precompiledheader.hpp");
+        result.push_back("-fsyntax-only");
+        result.push_back(name);
+        return result;
     };
 
     auto compileCmdFor = [&](const std::string &name, const std::string &obj) {
@@ -477,17 +494,6 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
             compiler, ppdefs, includes, linkerFlags, name, obj);
     };
 
-    auto analyzeAst =
-        [&](const std::string &jsonFile, const std::string &srcName,
-            std::vector<VarDecl> &outVars, bool &outHeaderChanged) -> int {
-        analysis::ClangAstAnalyzerAdapter analyzer;
-        int ares = analyzer.analyzeFile(jsonFile, srcName, outVars);
-        if (ares == 0) {
-            outHeaderChanged = analyzer.getContext()->hasHeaderChanged();
-        }
-        return ares;
-    };
-
     auto processOne = [&](const std::string &name,
                           bool buildAndLink = false) -> SourceProcessResult {
         SourceProcessResult r;
@@ -504,16 +510,40 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
             r.objectName = std::format("{}.o", r.purefilename);
         }
 
-        const std::string astCmd = astCmdFor(name, r.purefilename);
+        int ares = -1;
+        bool headerChanged = false;
+
         const std::string ccCmd = buildAndLink
                                       ? compileAndLinkCmdFor(name, r.objectName)
                                       : compileCmdFor(name, r.objectName);
 
+        auto astFn = [&] {
+            execution::SpawnToMemfdMap executor{
+                {.redirect_stderr = false, .memfd_flags = 0}};
+            auto astCmd = astCmdArgs(name, r.purefilename);
+            auto result = executor.runDup2(astCmd);
+            if (result != 0) {
+                r.errorCode = result;
+                r.errorMessage = std::format("AST dump failed for {}: {}", name,
+                                             r.purefilename);
+                return result;
+            }
+
+            auto data = executor.view();
+
+            analysis::ClangAstAnalyzerAdapter analyzer;
+            ares = analyzer.analyzeJson(data, name, r.localVars);
+            if (ares == 0) {
+                headerChanged = analyzer.getContext()->hasHeaderChanged();
+            }
+
+            return result;
+        };
+
         try {
             // AST + compile em paralelo
-            auto futAst = std::async(std::launch::async, [&, astCmd] {
-                return utility::runProgramGetOutput(astCmd);
-            });
+            auto futAst = std::async(std::launch::async, astFn);
+
             auto futCC = std::async(std::launch::async, [&, ccCmd] {
                 return utility::runProgramGetOutput(ccCmd);
             });
@@ -521,12 +551,13 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
             const auto astRes = futAst.get();
             const auto ccRes = futCC.get();
 
-            if (astRes.second != 0) {
-                r.errorCode = astRes.second;
+            if (astRes != 0) {
+                r.errorCode = astRes;
                 r.errorMessage =
-                    std::format("AST dump failed for {}: {}", name, astCmd);
+                    std::format("AST dump failed for {}: {}", name, name);
                 return r;
             }
+
             if (ccRes.second != 0) {
                 r.errorCode = ccRes.second;
                 r.errorMessage = std::format(
@@ -534,10 +565,6 @@ CompilerResult<CompilationResult> CompilerService::buildMultipleSourcesWithAST(
                 return r;
             }
 
-            // Análise do JSON
-            bool headerChanged = false;
-            const int ares = analyzeAst(r.purefilename + ".json", name,
-                                        r.localVars, headerChanged);
             if (ares != 0) {
                 r.errorCode = ares;
                 r.errorMessage = std::format(

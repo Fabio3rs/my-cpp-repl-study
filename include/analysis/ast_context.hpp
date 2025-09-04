@@ -52,6 +52,8 @@ class AstContext {
     AstContext(AstContext &&) = default;
     AstContext &operator=(AstContext &&) = default;
 
+    static bool includesChanged;
+
     /**
      * @brief Adiciona um include ao header de saída
      * @param includePath Caminho do arquivo de include

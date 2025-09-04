@@ -565,10 +565,11 @@ auto linkAllObjects(const std::vector<std::string> &objects,
     return result.success() ? result.value : -1;
 }
 
-auto buildLibAndDumpASTWithoutPrint(
-    std::string compiler, const std::string &libname,
-    const std::vector<std::string> &names,
-    const std::string &std) -> std::pair<std::vector<VarDecl>, int> {
+auto buildLibAndDumpASTWithoutPrint(std::string compiler,
+                                    const std::string &libname,
+                                    const std::vector<std::string> &names,
+                                    const std::string &std)
+    -> std::pair<std::vector<VarDecl>, int> {
     initCompilerService();
 
     auto result = compilerService->buildMultipleSourcesWithAST(
@@ -689,9 +690,10 @@ void resolveSymbolOffsetsFromLib(
     }
 }
 
-auto prepareWrapperAndLoadCodeLib(
-    const CompilerCodeCfg &cfg, std::vector<VarDecl> &&vars,
-    std::vector<utility::SymbolDef> symbols) -> EvalResult {
+auto prepareWrapperAndLoadCodeLib(const CompilerCodeCfg &cfg,
+                                  std::vector<VarDecl> &&vars,
+                                  std::vector<utility::SymbolDef> symbols)
+    -> EvalResult {
     std::unordered_map<std::string, std::string> functions;
 
     auto asyncPrepare = std::async(std::launch::async, [&]() {
@@ -1121,6 +1123,12 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
+    if (!replState.shouldRecompilePrecompiledHeader) {
+        replState.shouldRecompilePrecompiledHeader =
+            analysis::AstContext::includesChanged;
+        analysis::AstContext::includesChanged = false;
+    }
+
     /**
      * If this is multiline, this must be a code block, not just an include
      * directive
@@ -1202,6 +1210,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         std::cout << "🔨 Rebuilding precompiled header...\n";
         build_precompiledheader();
         replState.shouldRecompilePrecompiledHeader = false;
+        analysis::AstContext::includesChanged = false;
         std::cout << "✅ Precompiled header rebuilt successfully\n";
     }
 
@@ -1307,7 +1316,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
             }
         } else {
             // Detecção inteligente: definição vs código executável
-            if (isDefinitionCode(line)) {
+            /*if (isDefinitionCode(line)) {
                 // É uma definição - adiciona ao escopo global sem exec()
                 if (verbosityLevel >= 2) {
                     std::cout << "🔧 Detected global definition\n";
@@ -1318,7 +1327,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                 }
                 // Não envolver em exec(), deixar como definição global
                 cfg.analyze = true; // Queremos analisar definições para AST
-            } else {
+            } else*/
+            {
                 // É código executável - envolver em exec()
                 if (verbosityLevel >= 2) {
                     std::cout << "⚡ Detected executable code\n";

@@ -246,6 +246,8 @@ class CompilerService {
     static bool checkIncludeExists(const BuildSettings &settings,
                                    const std::string &includePath);
 
+    const BuildSettings *buildSettings() const { return buildSettings_; }
+
   private:
     // === Internal Helper Methods ===
 
