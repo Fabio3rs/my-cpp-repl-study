@@ -41,17 +41,20 @@ class SpawnToMemfdMap {
     explicit SpawnToMemfdMap(const Options &opt = {})
         : m_pid(-1), m_fd(-1), m_addr(MAP_FAILED), m_len(0) {
         m_fd = memfd_create_compat("cpprepl-cap", opt.memfd_flags);
-        if (m_fd < 0)
+        if (m_fd < 0) {
             throw std::runtime_error(std::string("memfd_create: ") +
                                      std::strerror(errno));
+        }
         m_opts = opt;
     }
 
     ~SpawnToMemfdMap() {
-        if (m_addr != MAP_FAILED)
+        if (m_addr != MAP_FAILED) {
             ::munmap(m_addr, m_len);
-        if (m_fd >= 0)
+        }
+        if (m_fd >= 0) {
             ::close(m_fd);
+        }
     }
 
     // Caminho "/proc/<self>/fd/<fd>" para usar com shell:  cmd + " > " +
@@ -111,8 +114,9 @@ class SpawnToMemfdMap {
                                const_cast<char *>(dashc),
                                const_cast<char *>(command.c_str()), nullptr};
         if (int rc =
-                ::posix_spawnp(&m_pid, sh, nullptr, nullptr, cargv, environ))
+                ::posix_spawnp(&m_pid, sh, nullptr, nullptr, cargv, environ)) {
             return rc;
+        }
         return wait_and_map();
     }
 
@@ -133,14 +137,17 @@ class SpawnToMemfdMap {
 
     int wait_and_map() {
         int status = 0;
-        if (::waitpid(m_pid, &status, 0) < 0)
+        if (::waitpid(m_pid, &status, 0) < 0) {
             return errno;
-        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        }
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             return (status ? status : ECHILD);
+        }
 
         struct stat st {};
-        if (::fstat(m_fd, &st) != 0)
+        if (::fstat(m_fd, &st) != 0) {
             return errno;
+        }
         if (st.st_size == 0) {
             m_len = 0;
             return 0;
@@ -148,15 +155,16 @@ class SpawnToMemfdMap {
 
         m_len = static_cast<size_t>(st.st_size);
         m_addr = ::mmap(nullptr, m_len, PROT_READ, MAP_PRIVATE, m_fd, 0);
-        if (m_addr == MAP_FAILED)
+        if (m_addr == MAP_FAILED) {
             return errno;
+        }
         return 0;
     }
 
     Options m_opts{};
     pid_t m_pid{};
     int m_fd{};
-    void *m_addr{};
+    void *m_addr{MAP_FAILED};
     size_t m_len{};
 };
 } // namespace execution
