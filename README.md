@@ -26,15 +26,10 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 4. **Handles crashes gracefully** by converting hardware signals into manageable C++ exceptions
 5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
 
-<<<<<<< HEAD
-**Performance Achievements (Measured in Ubuntu 24.04)**:
-- **Fast compilation** (80-95ms average) through optimized parallel pipeline and LLVM linker
-=======
 **Performance Snapshot (Ubuntu 24.04, Clang 18)**:
 - **Single-source compile**: ~90–96 ms per evaluation (parallel pipeline + PCH)
 - **Load/execution overhead**: **~1μs–48ms** per executable block (highly variable `load time`)
 - **Script via STDIN (example below)**: total observed time ~2.6–3.0 s (cpprepl) vs **~0.21–0.22 s** (clang-repl-18)
->>>>>>> 76893e7 (Ajusts comparison README)
 - **Simple completion** with basic symbol and keyword matching
 - **Note**: In `clang-repl-18`, the **cold start** (initialization/JIT) typically takes **~100–120 ms**; the remainder is I/O and snippet execution.
 
