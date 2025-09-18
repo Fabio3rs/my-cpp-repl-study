@@ -295,6 +295,11 @@ int main(int argc, char **argv) {
 
     // Execute script if provided
     if (!scriptFile.empty()) {
+        // Ensure async PCH rebuilds are disabled when running from a file
+        // to avoid background rebuilds interfering with deterministic script
+        // execution.
+        set_async_pch_rebuild(false);
+
         std::fstream file(scriptFile, std::ios::in);
 
         if (!file.is_open()) {

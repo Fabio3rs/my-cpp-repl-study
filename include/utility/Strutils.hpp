@@ -82,8 +82,8 @@ class Strutils {
     }
 
     template <class StrType = std::string>
-    static auto explode(std::string_view strview,
-                        std::string_view term) -> std::vector<StrType> {
+    static auto explode(std::string_view strview, std::string_view term)
+        -> std::vector<StrType> {
         size_t current = 0;
         std::vector<StrType> result;
 
@@ -189,8 +189,8 @@ class Strutils {
     }
 
     template <class StrType = std::string>
-    static auto split(std::string_view strview,
-                      std::string_view term) -> std::vector<StrType> {
+    static auto split(std::string_view strview, std::string_view term)
+        -> std::vector<StrType> {
         size_t current = 0;
         std::vector<StrType> result;
 
@@ -218,6 +218,20 @@ class Strutils {
         } while (current < strview.size());
 
         return result;
+    }
+
+    static inline std::string_view trim(const std::string_view str) noexcept {
+        auto is_not_blank = [](unsigned char ch) {
+            return !std::isblank(ch) && ch != '\n' && ch != '\r';
+        };
+
+        auto first = std::find_if(str.begin(), str.end(), is_not_blank);
+        if (first == str.end()) {
+            return {};
+        }
+        auto last = std::find_if(str.rbegin(), str.rend(), is_not_blank).base();
+        return str.substr(std::distance(str.begin(), first),
+                          std::distance(first, last));
     }
 };
 

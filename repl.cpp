@@ -259,7 +259,8 @@ static inline bool handleReplCommand(std::string_view line, BuildSettings &bs,
         .includeDirectories = &bs.includeDirectories,
         .preprocessorDefinitions = &bs.preprocessorDefinitions,
         .linkLibraries = &bs.linkLibraries,
-        .useCpp2Ptr = &useCpp2};
+        .useCpp2Ptr = &useCpp2,
+        .replStatePtr = &replState};
     return repl_commands::handleReplCommand(line, view);
 }
 
@@ -1114,6 +1115,10 @@ bool isDefinitionCode(const std::string &code) {
 
 auto execRepl(std::string_view lineview, int64_t &i) -> bool {
     lineview = trim(lineview);
+    // If a precompiled header rebuild is running asynchronously, wait for it
+    // before starting to process the next command. This ensures commands see
+    // a consistent state.
+    wait_for_pch_rebuild_if_running();
     std::string line(lineview);
     if (line == "exit") {
         return false;
@@ -1203,6 +1208,28 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                          "<header> or #include \"header\"\n";
             return true;
         }
+
+        if (replState.shouldRecompilePrecompiledHeader &&
+            replState.asyncPrecompiledHeaderRebuild &&
+            !replState.pchRebuildFuture.valid()) {
+            try {
+                replState.pchRebuildFuture =
+                    std::async(std::launch::async,
+                               []() { return build_precompiledheader(); });
+            } catch (const std::system_error &e) {
+                std::cerr << std::format("❌ Error: Could not start "
+                                         "precompiled header rebuild: {}\n",
+                                         e.what());
+            } catch (const std::exception &e) {
+                std::cerr << std::format("❌ Error: Exception starting "
+                                         "precompiled header rebuild: {}\n",
+                                         e.what());
+            } catch (...) {
+                std::cerr << "❌ Error: Unknown error starting precompiled "
+                             "header rebuild\n";
+            }
+        }
+
         return true;
     }
 
@@ -1695,6 +1722,34 @@ void shutdownRepl() {
 #ifndef NUSELIBNOTIFY
     notify_uninit();
 #endif
+}
+
+// Control async precompiled header rebuild behavior. When disabling async
+// behavior we need to wait for any in-flight rebuild to finish.
+void set_async_pch_rebuild(bool enabled) noexcept {
+    replState.asyncPrecompiledHeaderRebuild = enabled;
+    if (!enabled) {
+        // If disabling async while a rebuild is running, wait for it to finish
+        wait_for_pch_rebuild_if_running();
+    }
+}
+
+void wait_for_pch_rebuild_if_running() noexcept {
+    try {
+        if (replState.pchRebuildFuture.valid()) {
+            // Wait for completion, but swallow exceptions to avoid crashing
+            try {
+                replState.pchRebuildFuture.get();
+
+                replState.shouldRecompilePrecompiledHeader = false;
+                analysis::AstContext::includesChanged = false;
+            } catch (...) {
+                // ignore - rebuild may have failed
+            }
+        }
+    } catch (...) {
+        // be extra defensive: any error here should not bring down the REPL
+    }
 }
 
 void initNotifications(std::string_view appName) {

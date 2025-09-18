@@ -17,6 +17,14 @@ if(GTest_FOUND)
     target_link_libraries(tests PRIVATE cpprepl_lib GTest::GTest GTest::Main segvcatch)
     gtest_discover_tests(tests)
 
+    # PCH async control tests
+    add_executable(pch_async_tests
+        test_pch_async.cpp
+    )
+    target_include_directories(pch_async_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(pch_async_tests PRIVATE cpprepl_lib GTest::GTest GTest::Main segvcatch)
+    gtest_discover_tests(pch_async_tests)
+
     # ==============================================================================
     # COMPONENT-SPECIFIC UNIT TESTS
     # ==============================================================================

@@ -2,6 +2,7 @@
 
 #include <any>
 #include <functional>
+#include <future>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -106,6 +107,10 @@ struct ReplState {
     std::unordered_map<std::string, EvalResult> evalResults;
     std::vector<std::function<bool()>> lazyEvalFns;
     std::unordered_set<std::string> includedFiles;
+    // Async precompiled header rebuild control
+    bool asyncPrecompiledHeaderRebuild = true;
+    std::future<int>
+        pchRebuildFuture; // valid() == true if a rebuild is in progress
 };
 
 auto analyzeCustomCommands(
@@ -120,6 +125,14 @@ auto compileAndRunCodeCustom(
     const std::vector<std::string> &objects) -> EvalResult;
 
 void addIncludeDirectory(const std::string &dir);
+
+// Control async precompiled header rebuild behavior. When disabled, rebuilds
+// happen synchronously. If disabling while a rebuild future exists, the call
+// will wait for completion.
+void set_async_pch_rebuild(bool enabled) noexcept;
+
+// Wait for any in-progress async PCH rebuild to finish (no-op if none).
+void wait_for_pch_rebuild_if_running() noexcept;
 
 std::any getResultRepl(std::string cmd);
 

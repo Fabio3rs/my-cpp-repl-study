@@ -5,6 +5,9 @@
 #include <string_view>
 
 #include "commands/command_registry.hpp"
+#include "repl.hpp"
+#include "utility/Strutils.hpp"
+#include <unordered_set>
 
 // Forward declaration provided by repl.cpp
 bool loadPrebuilt(const std::string &path);
@@ -16,6 +19,7 @@ struct ReplCtxView {
     std::unordered_set<std::string> *preprocessorDefinitions;
     std::unordered_set<std::string> *linkLibraries;
     bool *useCpp2Ptr;
+    ReplState *replStatePtr; // pointer to REPL state for commands that need it
 };
 
 inline void registerReplCommands(ReplCtxView *) {
@@ -192,6 +196,58 @@ inline void registerReplCommands(ReplCtxView *) {
                 << "  #eval myfile.cpp               // Execute C++ file\n";
             std::cout << "\n";
 
+            return true;
+        });
+
+    // Control async PCH rebuild behavior from the REPL
+    commands::registry().registerPrefix(
+        "#pchasync", "Enable/disable async PCH rebuild (on/off)",
+        [](std::string_view arg, commands::CommandContextBase &base) {
+            auto &ctx =
+                static_cast<commands::BasicContext<ReplCtxView> &>(base).data;
+
+            arg = Strutils::trim(arg);
+
+            if (arg.empty()) {
+                if (!ctx.replStatePtr) {
+                    return false;
+                }
+
+                std::cout << (ctx.replStatePtr->asyncPrecompiledHeaderRebuild
+                                  ? "Async PCH rebuild: ON\n"
+                                  : "Async PCH rebuild: OFF\n");
+                return true;
+            }
+
+            std::string a(arg);
+            Strutils::to_lower(a);
+
+            if (a == "status") {
+                if (!ctx.replStatePtr) {
+                    return false;
+                }
+
+                std::cout << (ctx.replStatePtr->asyncPrecompiledHeaderRebuild
+                                  ? "Async PCH rebuild: ON\n"
+                                  : "Async PCH rebuild: OFF\n");
+                return true;
+                return true;
+            }
+
+            bool enable = false;
+            if (a == "on" || a == "1" || a == "true") {
+                enable = true;
+            } else if (a == "off" || a == "0" || a == "false") {
+                enable = false;
+            } else {
+                std::cerr << "Usage: #pchasync on|off\n";
+                return true;
+            }
+
+            // Prefer public API to change behavior (it will wait if disabling)
+            set_async_pch_rebuild(enable);
+            std::cout << (enable ? "Async PCH rebuild enabled\n"
+                                 : "Async PCH rebuild disabled\n");
             return true;
         });
 }
