@@ -1233,6 +1233,16 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
         return true;
     }
 
+    // Lets add the printerOutput.hpp include to PCH if not present
+    if (line.starts_with("#return ")) {
+        bool addedHeader =
+            analysis::AstContext::addInclude("printerOutput.hpp", false);
+
+        if (addedHeader) {
+            replState.shouldRecompilePrecompiledHeader = true;
+        }
+    }
+
     if (replState.shouldRecompilePrecompiledHeader) {
         std::cout << "🔨 Rebuilding precompiled header...\n";
         build_precompiledheader();
@@ -1378,8 +1388,7 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                                      expression);
         }
 
-        line = std::format("#include \"printerOutput.hpp\"\n"
-                           "void exec() {{ printdata((({0})), {1}, "
+        line = std::format("void exec() {{ printdata((({0})), {1}, "
                            "typeid(decltype(({0}))).name()); }}",
                            expression, utility::quote(expression));
 

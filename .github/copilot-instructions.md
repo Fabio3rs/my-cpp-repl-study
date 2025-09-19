@@ -80,6 +80,22 @@
 - **Includes**: Ordem: local → projeto → terceiros → STL; um por linha.
 - **Formatação**: Compatível com *clang-format* (LLVM style, largura 100, `{` na mesma linha, espaços após vírgula).
 
+### Blocos de controle — sempre usar chaves
+Por questão de legibilidade e para evitar bugs sutis em manutenções futuras, sempre emita chaves mesmo para blocos de controle com uma única instrução. Exemplo preferido:
+
+```cpp
+if (a) {
+   foo();
+}
+```
+Evite a forma sem chaves:
+
+```cpp
+if (a)
+   foo();
+```
+Esta regra reduz erros quando linhas são adicionadas posteriormente e melhora a consistência do código.
+
 ---
 
 ## 5) Erros e logging (modelo)
@@ -141,7 +157,7 @@ return consume(*r);
 
 ## 10) TL;DR para o Copilot
 
-* **Prefira**: RAII, `span`/`string_view`, `[[nodiscard]]`, `noexcept`, early returns, guard clauses, logs estruturados.
+* **Prefira**: RAII, `span`/`string_view`, `[[nodiscard]]`, `noexcept`, early returns, guard clauses, logs estruturados, sempre emita chaves em blocos de controle.
 * **Evite**: macros (exceto integração de sinais), alocação em caminhos críticos, ponteiros crus profundos, `goto` ou recursão desnecessária.
 * **Exija**: warnings zero, clang-tidy verde, testes com sanitizers.
 
