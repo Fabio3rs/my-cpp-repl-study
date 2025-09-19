@@ -1,4 +1,5 @@
 #include "completion/simple_readline_completion.hpp"
+#include "commands/command_registry.hpp"
 #include "repl.hpp" // Para ReplState e VarDecl
 #include <algorithm>
 #include <cstring>
@@ -20,6 +21,11 @@ void SimpleReadlineCompletion::initialize() noexcept {
     rl_attempted_completion_function = completionFunction;
     rl_completer_word_break_characters =
         const_cast<char *>(" \t\n\"'`@$><=;|&{(");
+
+    keywords_.clear();
+    replCommands_.clear();
+    variables_.clear();
+    functions_.clear();
 
     addBuiltinKeywords();
     addReplCommands();
@@ -94,13 +100,24 @@ void SimpleReadlineCompletion::addBuiltinKeywords() noexcept {
 }
 
 void SimpleReadlineCompletion::addReplCommands() noexcept {
-    constexpr const char *replCmds[] = {
-        "#help",       "#welcome", "#eval",       "#lazyeval", "#return",
-        "#batch_eval", "#include", "#includedir", "#lib",      "#link",
-        "#define",     "#undef",   "printall",    "evalall",   "exit"};
-
-    for (const auto *cmd : replCmds) {
-        replCommands_.emplace(cmd);
+    // Populate replCommands_ from the central commands registry so that
+    // completion reflects all registered REPL commands (including plugins
+    // and dynamically registered ones).
+    try {
+        const auto &entries = commands::registry().entries();
+        for (const auto &e : entries) {
+            replCommands_.emplace(e.prefix);
+        }
+    } catch (...) {
+        // Fallback to a small static set if registry access fails for any
+        // reason (defensive programming)
+        constexpr const char *replCmds[] = {
+            "#help",       "#welcome", "#eval",       "#lazyeval", "#return",
+            "#batch_eval", "#include", "#includedir", "#lib",      "#link",
+            "#define",     "#undef",   "printall",    "evalall",   "exit"};
+        for (const auto *cmd : replCmds) {
+            replCommands_.emplace(cmd);
+        }
     }
 }
 
@@ -178,9 +195,29 @@ std::vector<std::string> SimpleReadlineCompletion::getCompletions(
 }
 
 // Static callback implementation
+// Generator used by readline's rl_completion_matches. Returns a strdup()'d
+// string or nullptr when exhausted. readline will free returned strings.
+char *SimpleReadlineCompletion::completion_generator(const char *text,
+                                                     int state) noexcept {
+    static size_t idx = 0;
+    if (state == 0) {
+        idx = 0;
+    }
+
+    if (!activeInstance_)
+        return nullptr;
+
+    if (idx >= currentMatches_.size())
+        return nullptr;
+
+    const std::string &s = currentMatches_[idx++];
+    return strdup(s.c_str());
+}
+
 char **SimpleReadlineCompletion::completionFunction(const char *text, int start,
                                                     int end) noexcept {
-    // Prevenir completion padrão do readline
+    // Let readline handle single-tab vs double-tab behavior; provide
+    // candidates via rl_completion_matches.
     rl_attempted_completion_over = 1;
 
     if (!activeInstance_ || !text) {
@@ -194,33 +231,13 @@ char **SimpleReadlineCompletion::completionFunction(const char *text, int start,
         return nullptr;
     }
 
-    // Alocar array de strings para readline
-    char **matches = static_cast<char **>(
-        malloc(sizeof(char *) * (currentMatches_.size() + 1)));
-
-    if (!matches) {
-        return nullptr;
-    }
-
-    for (size_t i = 0; i < currentMatches_.size(); ++i) {
-        matches[i] = strdup(currentMatches_[i].c_str());
-        if (!matches[i]) {
-            // Cleanup em caso de falha
-            for (size_t j = 0; j < i; ++j) {
-                free(matches[j]);
-            }
-            free(matches);
-            return nullptr;
-        }
-    }
-    matches[currentMatches_.size()] = nullptr;
-
     if (verbosityLevel >= 3) {
-        std::cout << "[DEBUG] Completion: Found " << currentMatches_.size()
-                  << " matches for '" << text << "'\n";
+        std::cout << "[DEBUG] completionFunction(prefix='" << text
+                  << "', start=" << start << ", end=" << end << ") -> "
+                  << currentMatches_.size() << " matches\n";
     }
 
-    return matches;
+    return rl_completion_matches(text, completion_generator);
 }
 
 // RAII Wrapper Implementation

@@ -52,6 +52,8 @@ class SimpleReadlineCompletion {
     // Static callbacks for readline
     static char **completionFunction(const char *text, int start,
                                      int end) noexcept;
+    // Generator used by rl_completion_matches
+    static char *completion_generator(const char *text, int state) noexcept;
 
     // Static state for callbacks
     static SimpleReadlineCompletion *activeInstance_;

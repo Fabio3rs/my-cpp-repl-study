@@ -1378,7 +1378,8 @@ auto execRepl(std::string_view lineview, int64_t &i) -> bool {
                                      expression);
         }
 
-        line = std::format("void exec() {{ printdata((({0})), {1}, "
+        line = std::format("#include \"printerOutput.hpp\"\n"
+                           "void exec() {{ printdata((({0})), {1}, "
                            "typeid(decltype(({0}))).name()); }}",
                            expression, utility::quote(expression));
 
@@ -1701,6 +1702,14 @@ void initRepl() {
 
     compilerService->buildCustomPCH("clang++", "printerOutput.hpp",
                                     "printerOutput.hpp.pch");
+
+    repl_commands::ReplCtxView view{.includeDirectories = nullptr,
+                                    .preprocessorDefinitions = nullptr,
+                                    .linkLibraries = nullptr,
+                                    .useCpp2Ptr = nullptr,
+                                    .replStatePtr = &replState};
+
+    repl_commands::registerReplCommands(&view);
 
     // Inicializar completion com estado atual do REPL
     completionScope =

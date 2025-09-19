@@ -232,6 +232,7 @@ void ContextualAstAnalyzer::analyzeInnerAST(std::filesystem::path source,
                     !path.ends_with(".cc") &&
                     p.filename() != "decl_amalgama.hpp" &&
                     p.filename() != "printerOutput.hpp" &&
+                    p.filename() != "precompiledheader.hpp" &&
                     includedFrom_string.value() == source &&
                     !context_->isFileIncluded(path)) {
                     context_->addInclude(path);
