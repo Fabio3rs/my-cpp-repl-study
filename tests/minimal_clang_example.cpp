@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <clang/Basic/DiagnosticOptions.h>
+#include <clang/Basic/Version.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
 #include <clang/Frontend/FrontendActions.h>
@@ -78,6 +79,27 @@ static std::vector<std::string> detectSystemIncludeDirs() {
         }
     }
     return dirs;
+}
+
+void initializeDiagnostics(clang::CompilerInstance &ci) {
+    // Clang 20+ requires passing the VFS; older releases provide the default
+    // parameterless overload. Keep both to match the CI toolchain (Clang 18/19)
+    // and newer developer setups.
+#if CLANG_VERSION_MAJOR >= 20
+    ci.createDiagnostics(ci.getVirtualFileSystem());
+#else
+    ci.createDiagnostics();
+#endif
+}
+
+void initializeDiagnostics(clang::CompilerInstance &ci,
+                           clang::DiagnosticConsumer *client,
+                           bool shouldOwnClient) {
+#if CLANG_VERSION_MAJOR >= 20
+    ci.createDiagnostics(ci.getVirtualFileSystem(), client, shouldOwnClient);
+#else
+    ci.createDiagnostics(client, shouldOwnClient);
+#endif
 }
 
 int testeEmC() {
@@ -159,7 +181,7 @@ int testeEmCpp() {
     // 1) Preparar CompilerInstance + Diagnostics (igual ao seu exemplo)
     clang::CompilerInstance CI;
     auto DiagOpts = std::make_shared<clang::DiagnosticOptions>();
-    CI.createDiagnostics();
+    initializeDiagnostics(CI);
 
     // 2) Invocation (args mínimos)
     auto Inv = std::make_shared<clang::CompilerInvocation>();
@@ -257,7 +279,7 @@ int main() {
     clang::CompilerInvocation::CreateFromArgs(
         *Inv, llvm::ArrayRef(args).slice(1), diags); // skip argv[0]
     CI->setInvocation(Inv);
-    CI->createDiagnostics(diagPrinter, false);
+    initializeDiagnostics(*CI, diagPrinter, false);
 
     auto MB = llvm::MemoryBuffer::getMemBufferCopy(code, fname);
     // Caso queira que o CI cuide da vida útil, deixe o flag padrão (false) e

@@ -48,10 +48,6 @@ pkg_check_modules(LIBNOTIFY REQUIRED IMPORTED_TARGET libnotify)
 find_package(nlohmann_json QUIET)
 find_package(Clang QUIET)
 
-# Optional dependencies
-find_package(nlohmann_json QUIET)
-find_package(Clang QUIET)
-
 # ==============================================================================
 # DEPENDENCY STATUS REPORTING
 # ==============================================================================
@@ -261,10 +257,6 @@ endif()
 add_executable(cpprepl main.cpp)
 target_precompile_headers(cpprepl PUBLIC stdafx.hpp)
 target_link_libraries(cpprepl PRIVATE cpprepl_lib segvcatch)
-
-# ==============================================================================
-# DEMO EXECUTABLES AND EXAMPLES
-# ==============================================================================
 
 # ==============================================================================
 # DEMO EXECUTABLES AND EXAMPLES
