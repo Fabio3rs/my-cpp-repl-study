@@ -42,7 +42,9 @@ find_package(GTest)
 find_package(PkgConfig REQUIRED)
 find_package(TBB REQUIRED)
 pkg_check_modules(READLINE REQUIRED readline)
-pkg_check_modules(LIBNOTIFY REQUIRED IMPORTED_TARGET libnotify)
+if(ENABLE_NOTIFICATIONS)
+    pkg_check_modules(LIBNOTIFY REQUIRED IMPORTED_TARGET libnotify)
+endif()
 
 # Optional dependencies
 find_package(nlohmann_json QUIET)
@@ -204,7 +206,8 @@ if(ENABLE_NOTIFICATIONS)
     target_link_libraries(cpprepl_lib PUBLIC PkgConfig::LIBNOTIFY)
     target_compile_definitions(cpprepl_lib PUBLIC ENABLE_NOTIFICATIONS)
 else()
-    message(STATUS "✗ Desktop notifications disabled")
+    message(STATUS "✗ Desktop notifications disabled (reconfigure with -DENABLE_NOTIFICATIONS=ON to enable libnotify support)")
+    target_compile_definitions(cpprepl_lib PUBLIC NUSELIBNOTIFY)
 endif()
 
 # ==============================================================================

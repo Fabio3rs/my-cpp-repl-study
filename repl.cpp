@@ -34,7 +34,9 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#ifndef NUSELIBNOTIFY
 #include <libnotify/notify.h>
+#endif
 #include <mutex>
 #include <readline/history.h>
 #include <readline/readline.h>
