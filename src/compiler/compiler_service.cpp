@@ -402,10 +402,11 @@ CompilerService::linkObjects(const std::vector<std::string> &objects,
                              const std::string &libname) const {
     std::string linkLibraries = getLinkLibrariesStr();
     std::string namesConcated = concatenateNames(objects);
+    std::string extraLinkerFlags = buildSettings_->getExtraLinkerFlags();
 
     std::string cmd =
-        std::format("clang++ -shared -g -WL,--export-dynamic {} {} -o lib{}.so",
-                    namesConcated, linkLibraries, libname);
+        std::format("clang++ -shared -g -Wl,--export-dynamic {} {} {} -o lib{}.so",
+                    namesConcated, linkLibraries, extraLinkerFlags, libname);
 
     return executeCommand(cmd);
 }
