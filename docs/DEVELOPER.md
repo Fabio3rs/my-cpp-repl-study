@@ -514,10 +514,10 @@ if (line.starts_with("#include")) {
 
 | Mechanism | Use Case | Global State Handling | Safety |
 |-----------|----------|----------------------|---------|
-| `#include "file.cpp"` | ❌ Dangerous for globals | Each .so gets own copy | Double-free on exit |
-| `#eval file.cpp` | ✅ Recommended | REPL manages externs | Safe destruction |
-| `#include <header>` | ✅ Safe | Standard library | No issues |
-| `#include "header.h"` | ✅ Safe | Declarations only | No issues |
+| `#include "file.cpp"` | Dangerous for globals | Each .so gets own copy | Double-free on exit |
+| `#eval file.cpp` | Recommended | REPL manages externs | Safe destruction |
+| `#include <header>` | Safe | Standard library | No issues |
+| `#include "header.h"` | Safe | Declarations only | No issues |
 
 **Why Double-Free Occurs:**
 
@@ -527,9 +527,9 @@ if (line.starts_with("#include")) {
 std::vector<int> numbers = {1, 2, 3};  // Independent instance per .so
 
 // On program exit:
-// .so₁ destructor: numbers.~vector()  ✓
-// .so₂ destructor: numbers.~vector()  ✓  
-// .so₃ destructor: numbers.~vector()  ❌ CRASH - already freed
+// .so₁ destructor: numbers.~vector()  OK
+// .so₂ destructor: numbers.~vector()  OK
+// .so₃ destructor: numbers.~vector()  CRASH - already freed
 ```
 
 **Safe Alternative with #eval:**

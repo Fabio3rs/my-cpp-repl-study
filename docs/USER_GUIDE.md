@@ -4,21 +4,21 @@
 
 **C++ REPL v1.5-alpha** is an interactive C++ development environment that compiles your code to native machine code and executes it in real-time. This alpha release provides stable core functionality with **simple completion**, **crash-safe execution**, and **parallel compilation**.
 
-## ✅ **Current Features (v1.5-alpha)**
+## Current Features (v1.5-alpha)
 
-- ✅ **Interactive C++ execution** - Line-by-line compilation and execution  
-- ✅ **Variable persistence** - Variables maintain state across REPL sessions
-- ✅ **Signal handling** (`-s` flag) - Graceful recovery from crashes
-- ✅ **Batch processing** (`-r` flag) - Execute C++ command files
-- ✅ **Simple autocompletion** - Basic keyword and symbol completion
-- ✅ **Include support** - `#include` directive functionality
-- ✅ **Plugin system** - Load pre-built libraries with `#loadprebuilt`
+- **Interactive C++ execution** - Line-by-line compilation and execution
+- **Variable persistence** - Variables maintain state across REPL sessions
+- **Signal handling** (`-s` flag) - Graceful recovery from crashes
+- **Batch processing** (`-r` flag) - Execute C++ command files
+- **Simple autocompletion** - Basic keyword and symbol completion
+- **Include support** - `#include` directive functionality
+- **Plugin system** - Load pre-built libraries with `#loadprebuilt`
 
-## 🚧 **Coming in v2.0**
+## Coming in v2.0
 
-- 🚧 **Advanced LSP completion** - Real clangd integration for semantic completion
-- 🚧 **Enhanced error diagnostics** - Rich error information with code context  
-- 🚧 **Multi-file project support** - Complex project handling
+- [Planned] **LSP completion** - clangd integration for semantic completion
+- [Planned] **Enhanced error diagnostics** - Rich error information with code context
+- [Planned] **Multi-file project support** - Complex project handling
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Command Reference](#command-reference)
-- [Advanced Features](#advanced-features)
+- [Additional Features](#additional-features)
 - [Performance](#performance)
 - [Troubleshooting](#troubleshooting)
 
@@ -73,7 +73,7 @@ sudo apt install build-essential clang cmake pkg-config \
 **Optional Dependencies:**
 - **nlohmann-json** (LSP completion demo)
 - **Doxygen** (API documentation generation)
-- **GoogleTest** (comprehensive testing)
+- **GoogleTest** (testing framework)
 
 ### Build Process
 
@@ -178,8 +178,8 @@ Enable hardware exception protection for crash recovery:
 ```cpp
 >>> int* bad_ptr = nullptr;
 >>> *bad_ptr = 42;  // This would normally crash
-⚠️  SEGV at: 0x7f8b2c0015a0
-🛡️  Crash recovered - REPL continues normally
+WARNING: SEGV at: 0x7f8b2c0015a0
+Crash recovered - REPL continues normally
 Stack trace: [automatic analysis provided]
 
 >>> int good_value = 42;  // REPL continues working
@@ -242,28 +242,28 @@ Stack trace: [automatic analysis provided]
 ✓ Headers processed automatically with compiler validation
 ```
 
-## ⚠️ **CRITICAL: Include vs Eval Usage**
+## CRITICAL: Include vs Eval Usage
 
 ### Using `#include` vs `#eval` - Important Distinction
 
 **For .cpp files with global variables, prefer `#eval` over `#include`:**
 
-❌ **DON'T DO THIS** - Causes double-free errors:
+**DON'T DO THIS** - Causes double-free errors:
 ```cpp
 // file: globals.cpp
 std::vector<int> numbers = {1, 2, 3};
 
 // In REPL:
->>> #include "globals.cpp"  // ❌ DANGEROUS!
+>>> #include "globals.cpp"  // DANGEROUS!
 ```
 
-✅ **DO THIS INSTEAD** - Safe approach:
+**DO THIS INSTEAD** - Safe approach:
 ```cpp
-// file: globals.cpp  
+// file: globals.cpp
 std::vector<int> numbers = {1, 2, 3};
 
 // In REPL:
->>> #eval globals.cpp       // ✅ SAFE!
+>>> #eval globals.cpp       // SAFE!
 ```
 
 **Why this matters:**
@@ -276,12 +276,12 @@ std::vector<int> numbers = {1, 2, 3};
 
 | File Type | Use | Reason |
 |-----------|-----|--------|
-| `.h/.hpp` headers | `#include` | ✅ Safe - declarations only |
-| System headers `<header>` | `#include` | ✅ Safe - standard library |
-| `.cpp` with globals | `#eval` | ✅ Safe - REPL manages extern declarations |
-| `.cpp` without globals | Either | ✅ Safe - no shared state |
+| `.h/.hpp` headers | `#include` | Safe - declarations only |
+| System headers `<header>` | `#include` | Safe - standard library |
+| `.cpp` with globals | `#eval` | Safe - REPL manages extern declarations |
+| `.cpp` without globals | Either | Safe - no shared state |
 
-## Advanced Features
+## Additional Features
 
 ### 1. Dynamic Library Loading
 
@@ -305,10 +305,10 @@ With `-s` flag, the REPL converts hardware faults to manageable exceptions:
 ```cpp
 >>> int arr[5];
 >>> arr[1000000] = 42;  // Out of bounds access
-⚠️  SEGV at: 0x7f8b2c0015a0
-📍 Fault location: main+0x42 (myprogram.so)
-🔍 Assembly: mov %eax,0x3d0900(%rax)
-🛡️  Execution recovered - continue coding
+WARNING: SEGV at: 0x7f8b2c0015a0
+Fault location: main+0x42 (myprogram.so)
+Assembly: mov %eax,0x3d0900(%rax)
+Execution recovered - continue coding
 ```
 
 ### 3. Variable Persistence
@@ -389,7 +389,7 @@ Examples:
 
 **1. Compilation Errors**
 ```
-❌ Error: compilation failed
+ERROR: compilation failed
 ```
 - Check C++ syntax
 - Verify all includes are available
@@ -398,7 +398,7 @@ Examples:
 
 **2. Library Loading Issues**
 ```
-❌ Error: cannot load library
+ERROR: cannot load library
 ```
 - Verify library exists and has correct permissions
 - Check library dependencies with `ldd`
@@ -406,7 +406,7 @@ Examples:
 
 **3. Memory Access Violations**
 ```
-⚠️ SEGV at: 0x7f8b2c0015a0
+WARNING: SEGV at: 0x7f8b2c0015a0
 ```
 - Use `-s` flag for crash protection
 - Check array bounds and pointer validity
@@ -414,7 +414,7 @@ Examples:
 
 **4. Missing Dependencies**
 ```
-❌ Error: libclang not found
+ERROR: libclang not found
 ```
 - Install development packages: `sudo apt install clang-dev libclang-dev`
 - Reconfigure build: `cmake .. && make`
@@ -477,7 +477,7 @@ Enable verbose output for debugging:
 - Use `#include` only for headers (.h/.hpp) and system headers
 - Use `#batch_eval` for project setup
 - Organize includes at session beginning
-- **⚠️ NEVER use `#include` on .cpp files with global variables** - use `#eval` instead
+- **NEVER use `#include` on .cpp files with global variables** - use `#eval` instead
 
 ## Integration Examples
 
@@ -509,25 +509,25 @@ true
 ## Safety and Limitations
 
 ### What Works Safely
-- ✅ Variable declarations and assignments
-- ✅ Function definitions and calls
-- ✅ STL container usage
-- ✅ Dynamic library loading
-- ✅ Exception handling
-- ✅ Template instantiation
+- Variable declarations and assignments
+- Function definitions and calls
+- STL container usage
+- Dynamic library loading
+- Exception handling
+- Template instantiation
 
 ### Current Limitations
-- ⚠️ **Shared memory model:** Code shares address space (security consideration)
-- ⚠️ **Linux/POSIX only:** Windows support not implemented
-- ⚠️ **Global state dependency:** Some operations require global state for dlopen/dlsym
-- ⚠️ **Single session:** Multiple concurrent REPL instances not supported
+- **Shared memory model:** Code shares address space (security consideration)
+- **Linux/POSIX only:** Windows support not implemented
+- **Global state dependency:** Some operations require global state for dlopen/dlsym
+- **Single session:** Multiple concurrent REPL instances not supported
 
 ### Safety Features
-- 🛡️ **Hardware exception conversion:** SIGSEGV/SIGFPE/SIGILL → C++ exceptions
-- 🛡️ **Graceful crash recovery:** Continue operation after errors
-- 🛡️ **Stack trace analysis:** Automatic debugging information
-- 🛡️ **Assembly introspection:** Detailed fault analysis
-- 🛡️ **Thread safety:** Complete synchronization for concurrent operations
+- **Hardware exception conversion:** SIGSEGV/SIGFPE/SIGILL → C++ exceptions
+- **Graceful crash recovery:** Continue operation after errors
+- **Stack trace analysis:** Automatic debugging information
+- **Assembly introspection:** Detailed fault analysis
+- **Thread safety:** Complete synchronization for concurrent operations
 
 ---
 

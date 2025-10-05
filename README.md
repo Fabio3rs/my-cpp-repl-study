@@ -24,64 +24,65 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 2. **Analyzes code semantically** through AST parsing for basic completion
 3. **Loads code dynamically** using the operating system's library loading mechanisms  
 4. **Handles crashes gracefully** by converting hardware signals into manageable C++ exceptions
-5. **Provides comprehensive debugging** with automatic crash analysis and assembly-level introspection
+5. **Provides debugging tools** with automatic crash analysis and assembly-level introspection
 
-**Performance Snapshot (Ubuntu 24.04, Clang 18)**:
-- **Single-source compile**: ~90–96 ms per evaluation (parallel pipeline + PCH)
-- **Load/execution overhead**: **~1μs–48ms** per executable block (highly variable `load time`)
-- **Script via STDIN (example below)**: total observed time ~2.6–3.0 s (cpprepl) vs **~0.21–0.22 s** (clang-repl-18)
-- **Simple completion** with basic symbol and keyword matching
-- **Note**: In `clang-repl-18`, the **cold start** (initialization/JIT) typically takes **~100–120 ms**; the remainder is I/O and snippet execution.
+**Performance Reference (measured on test system)**:
+- **Single-source compile**: ~90-96ms per evaluation (parallel pipeline + PCH)
+- **Load/execution overhead**: ~1μs-48ms per executable block (highly variable)
+- **Script via STDIN (example below)**: total observed time ~2.6-3.0s (cpprepl) vs ~0.21-0.22s (clang-repl-18)
+- **Simple completion**: Basic symbol and keyword matching via readline
+- **Note**: In `clang-repl-18`, the **cold start** (initialization/JIT) typically takes ~100-120ms; the remainder is I/O and snippet execution.
 
-**Alpha Status**: With **7,500+ lines** of tested code and **118/118 tests passing (100% success rate)**, the system demonstrates stable core functionality while some advanced features remain in development for v2.0.
+**Alpha Status**: With **7,500+ lines** of tested code and **118/118 tests passing (100% success rate)**, the core functionality is stable. Some features are still in development for v2.0.
 
-> **⚠️ Performance Disclaimer**: All performance measurements are system-dependent and may vary significantly based on hardware specifications, compiler versions, system load, and configuration. The numbers presented reflect specific test conditions on Ubuntu 24.04 with Clang 18 and should be used as relative comparisons rather than absolute benchmarks.
+> **Performance Disclaimer**: All performance numbers are **reference values only** and will vary significantly based on your hardware, compiler version, system load, and configuration. These measurements were taken on a specific test environment (Ubuntu 24.04 with Clang 18) and should be used **only for relative comparison**, not as expected performance on your system. Always benchmark on your own hardware to get accurate numbers.
 
-## ✅ **Working Features (v1.5-alpha)**
+## Working Features (v1.5-alpha)
 
 ### Core REPL Functionality
-- ✅ **Interactive C++ execution** - Line-by-line compilation and execution
-- ✅ **Variable persistence** - Variables maintain state across REPL sessions  
-- ✅ **Function definitions** - Define and call functions interactively
-- ✅ **Signal handling** (`-s` flag) - Graceful recovery from SIGSEGV, SIGFPE, SIGINT
-- ✅ **Batch processing** (`-r` flag) - Execute C++ command files
-- ✅ **Error recovery** - Continue REPL operation after compilation or runtime errors
+- **Interactive C++ execution** - Line-by-line compilation and execution
+- **Variable persistence** - Variables maintain state across REPL sessions
+- **Function definitions** - Define and call functions interactively
+- **Signal handling** (`-s` flag) - Graceful recovery from SIGSEGV, SIGFPE, SIGINT
+- **Batch processing** (`-r` flag) - Execute C++ command files
+- **Error recovery** - Continue REPL operation after compilation or runtime errors
 
-### Compilation System  
-- ✅ **Native compilation** - Direct to machine code using Clang
-- ✅ **Parallel pipeline** - AST analysis and compilation run concurrently  
-- ✅ **Dynamic linking** - Runtime loading of compiled shared libraries
-- ✅ **Include support** - `#include` directive functionality
-- ✅ **Library linking** - Link with system and custom libraries
+### Compilation System
+- **Native compilation** - Direct to machine code using Clang
+- **Parallel pipeline** - AST analysis and compilation run concurrently
+- **Dynamic linking** - Runtime loading of compiled shared libraries
+- **Include support** - `#include` directive functionality
+- **Library linking** - Link with system and custom libraries
 
 ### Development Tools
-- ✅ **Clang code completion** - Full semantic completion with libclang integration
-- ✅ **AST introspection** - Code analysis and structure understanding
-- ✅ **Plugin system** - `#loadprebuilt` command for loading pre-built libraries
-- ✅ **Comprehensive testing** - Extensive test suites covering all functionality (118 tests)
-- ✅ **Verbose logging** - Multiple verbosity levels for debugging
+- **Simple autocompletion** - Basic keyword and symbol completion via readline
+- **AST introspection** - Code analysis and structure understanding
+- **Plugin system** - `#loadprebuilt` command for loading pre-built libraries
+- **Test coverage** - Test suites covering core functionality (118 tests)
+- **Verbose logging** - Multiple verbosity levels for debugging
 
-## 🚀 **Future Enhancements (v2.1+ Roadmap)**
+## Future Enhancements (v2.0+ Roadmap)
 
-### Advanced Completion Features
-- 🚧 **Enhanced LSP integration** - Full JSON-RPC protocol support with clangd
-- 🚧 **Real-time diagnostics** - Live syntax and semantic error highlighting
-- 🚧 **Symbol documentation** - Hover information and signature help
+### Completion Features (Planned)
+- [Planned] **Semantic code completion** - Clang-based completion with libclang integration
+- [Planned] **LSP integration** - JSON-RPC protocol support with clangd
+- [Planned] **Real-time diagnostics** - Syntax and semantic error highlighting
+- [Planned] **Symbol documentation** - Hover information and signature help
 
 ### Platform & Performance
-- 🔧 **Cross-platform support** - Windows and macOS compatibility
-- 🔧 **Performance optimization** - Enhanced caching for large codebases
-- 🔧 **Memory optimization** - Improved handling of long REPL sessions
+- [Future] **Cross-platform support** - Windows and macOS compatibility
+- [Future] **Performance optimization** - Enhanced caching for large codebases
+- [Future] **Memory optimization** - Improved handling of long REPL sessions
 
 ### Development Experience
-- 📝 **IDE integration** - VS Code and other editor plugins
-- 📝 **Session persistence** - Save/restore REPL state between sessions
-- 📝 **Remote execution** - Network-based REPL server capabilities
+- [Future] **IDE integration** - VS Code and other editor plugins
+- [Future] **Session persistence** - Save/restore REPL state between sessions
+- [Future] **Remote execution** - Network-based REPL server capabilities
 
-## 🎯 **Future Plans (v2.0+)**
+## Future Plans (v2.0+)
 
-- **Advanced LSP Integration** - Full clangd server integration
-- **Multi-file Projects** - Support for complex project structures  
+- **LSP Integration** - clangd server integration
+- **Multi-file Projects** - Support for larger project structures
 - **Debugging Integration** - GDB integration for interactive debugging
 - **Cross-platform Support** - Windows and macOS compatibility
 - **Performance Profiling** - Built-in profiling tools
@@ -97,7 +98,7 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 - [Use Cases and Applications](#use-cases-and-applications)
 - [Technical Innovations vs. clang-repl](#technical-innovations-vs-clang-repl)
 - [Safety and Security Considerations](#safety-and-security-considerations)
-- [Advanced Assembly and Linking Techniques](#advanced-assembly-and-linking-techniques)
+- [Assembly and Linking Techniques](#assembly-and-linking-techniques)
 - [Future Work and Extensions](#future-work-and-extensions)
 - [Contributing](#contributing)
 - [License and Acknowledgments](#license-and-acknowledgments)
@@ -110,7 +111,7 @@ The initial concept emerged from exploring the feasibility of compiling code fro
 
 ```
 cpprepl/
-├── main.cpp                     # Entry point with robust CLI and signal handling
+├── main.cpp                     # Entry point with CLI and signal handling
 ├── repl.cpp                     # Core REPL implementation (1,503 lines, optimized)
 ├── repl.hpp                     # REPL interface definitions
 ├── stdafx.hpp                   # Precompiled header definitions
@@ -126,7 +127,7 @@ cpprepl/
 │   ├── execution/               # ExecutionEngine and SymbolResolver
 │   ├── completion/              # LSP integration and readline binding
 │   └── analysis/                # AST context and clang adapter
-├── tests/                       # Comprehensive test suite (2,143 lines)
+├── tests/                       # Test suite (2,143 lines)
 │   ├── integration/             # End-to-end REPL testing
 │   ├── unit/                    # Component-specific tests
 │   └── completion/              # LSP completion testing
@@ -146,29 +147,30 @@ cpprepl/
 - **REPL Engine** (`repl.cpp`): Streamlined core logic (29% size reduction from refactoring)
 - **CompilerService** (`src/compiler/`): **Parallel compilation pipeline** with optimized performance
 - **ExecutionEngine** (`src/execution/`): Thread-safe symbol resolution and execution management
-- **LSP Integration** (`src/completion/`): clangd-based semantic completion with readline integration
+- **Completion System** (`src/completion/`): Simple readline-based completion with basic symbol matching
 - **Signal Handler** (`segvcatch/`): Hardware exception to C++ exception translation
 - **AST Analyzer** (`src/analysis/`): Clang AST parsing and symbol extraction with context management
 - **Testing Framework** (`tests/`): 95%+ coverage with 7 specialized test suites
 - **Debugging Tools** (`utility/assembly_info.hpp`): Crash analysis and source correlation
 
 
-## 🧩 Comparison with State of the Art
+## Comparison with State of the Art
 
 * In case of any imprecise information, please open an issue or PR to fix it.
+* **Note**: Performance numbers in this table are **reference values from test measurements**. Your actual performance will vary based on your hardware and configuration.
 
-| System             | Compilation Model  | Performance (single eval)                         | Performance (script via pipe*) | Error Handling                    | Hot Reload   | Backtrace Quality       | Completion | Open Source | Platform |
-| ------------------ | ------------------ | -------------------------------------------------- | ------------------------------- | --------------------------------- | ------------ | ----------------------- | ---------- | ----------- | -------- |
-| **cpprepl (this)** | Native, shared lib | ~90–96 ms (compilation) + **~1μs–48ms** (loading) | **~2.6–3.0 s** (example script) | Signal→Exception + full backtrace | Per function | OS-level, source-mapped | (basic; LSP in roadmap) | Alpha   | Linux    |
-| clang-repl-18      | LLVM JIT IR        | **~100–120 ms cold start**; short evals <200 ms | **~0.21–0.22 s** (same script) | Managed (JIT abort)               | No           | IR-level                | Basic      | Yes         | Multi    |
-| cling              | JIT/Interpreter    | ~80–150 ms                                         | depends on script               | Managed (soft error)              | No           | Partial                 | Basic      | Yes         | Multi    |
+| System             | Compilation Model  | Performance (single eval)                        | Performance (script via pipe*) | Error Handling                    | Hot Reload   | Backtrace Quality       | Completion | Open Source | Platform |
+| ------------------ | ------------------ | ------------------------------------------------- | ------------------------------- | --------------------------------- | ------------ | ----------------------- | ---------- | ----------- | -------- |
+| **cpprepl (this)** | Native, shared lib | ~90-96ms (compilation) + ~1μs-48ms (loading) | ~2.6-3.0s (example script) | Signal→Exception + full backtrace | Per function | OS-level, source-mapped | Basic (readline) | Alpha   | Linux    |
+| clang-repl-18      | LLVM JIT IR        | ~100-120ms cold start; short evals <200ms | ~0.21-0.22s (same script) | Managed (JIT abort)               | No           | IR-level                | Basic      | Yes         | Multi    |
+| cling              | JIT/Interpreter    | ~80-150ms                                         | depends on script               | Managed (soft error)              | No           | Partial                 | Basic      | Yes         | Multi    |
 | Visual Studio HR   | Compiler-level     | ~200ms                                             | n/a                             | Patch revert / rollback           | Per instruction | Compiler map            | IntelliSense | No          | Windows  |
 | Python REPL        | Bytecode           | ~5ms                                               | ~50-100ms                       | Exception-based                   | Per function | High (source)           | Advanced   | Yes         | Multi    |
 
 \* Example script: see "How We Measure" section below.
 
-> **🔄 Performance Trade-offs**: This comparison highlights fundamental architectural differences:
-> - **Native Compilation (cpprepl)**: Higher per-evaluation overhead (~90-144ms total) but **full native execution speed** and complete debugging capabilities
+> **Performance Trade-offs**: This comparison highlights fundamental architectural differences:
+> - **Native Compilation (cpprepl)**: Higher per-evaluation overhead (~90-96ms compilation + ~1μs-48ms loading) but **full native execution speed** and complete debugging capabilities
 > - **JIT Systems (clang-repl, cling)**: Lower per-evaluation overhead but **interpreted/JIT execution** with limited debugging
 > - **Managed Languages (Python)**: Minimal evaluation overhead but **bytecode execution** performance
 >
@@ -177,9 +179,9 @@ cpprepl/
 
 ## Core Architecture and Techniques
 
-### 1. Advanced Signal Handling and Exception Translation
+### 1. Signal Handling and Exception Translation
 
-A sophisticated signal handling system converts hardware exceptions into C++ exceptions:
+The signal handling system converts hardware exceptions into C++ exceptions:
 
 #### Signal-to-Exception Architecture:
 
@@ -209,7 +211,7 @@ namespace segvcatch {
 
 #### Custom Exception Memory Management:
 
-The system implements a novel approach to exception backtrace capture by intercepting the C++ exception allocation mechanism:
+The system captures exception backtraces by intercepting the C++ exception allocation mechanism:
 
 ```cpp
 extern "C" void *__cxa_allocate_exception(size_t size) noexcept {
@@ -226,7 +228,7 @@ extern "C" void *__cxa_allocate_exception(size_t size) noexcept {
 }
 ```
 
-**Technical Innovations:**
+**Implementation Details:**
 - **ABI Interception**: Hooks into `__cxa_allocate_exception` to capture stack traces
 - **Memory Layout Management**: Embeds backtrace data within exception objects using careful alignment
 - **Magic Number System**: Uses `0xFADED0DEBAC57ACELL` for reliable backtrace identification
@@ -234,7 +236,7 @@ extern "C" void *__cxa_allocate_exception(size_t size) noexcept {
 
 ### 2. Assembly-Level Debugging and Introspection
 
-Advanced debugging capabilities provide detailed crash analysis:
+Debugging capabilities provide detailed crash analysis:
 
 ```cpp
 namespace assembly_info {
@@ -255,18 +257,18 @@ The system employs a **compile-then-link** approach rather than interpretation:
 
 - **Source-to-Shared-Library Pipeline**: Each user input is wrapped in C++ code and compiled into position-independent shared libraries (.so files) using Clang/GCC with `-shared -fPIC` flags
 - **Precompiled Headers**: Uses precompiled headers (precompiledheader.hpp.pch) to accelerate compilation times and reduce AST dump file sizes
-- **Parallel Compilation Architecture**: ✅ **IMPLEMENTED** - Optimized dual-level parallelization
+- **Parallel Compilation Architecture**: IMPLEMENTED - Optimized dual-level parallelization
   - **Inter-file Parallelism**: Multiple source files compiled simultaneously
   - **Intra-file Parallelism**: AST analysis and object compilation run in parallel using `std::async`
   - **Multi-core Scaling**: Linear performance scaling with available CPU cores
   - **Thread Configuration**: Auto-detects `hardware_concurrency()` with configurable thread limits
 
 **Performance Results:**
-- **Single File Compilation**: **90-96ms average** (measured in Ubuntu 24.04 environment)
+- **Single File Compilation**: ~90-96ms average (reference measurement on test system)
 - **Multi-file Projects**: Linear scaling with number of CPU cores
 - **Zero Breaking Changes**: Full backward compatibility maintained
 
-> **📊 Benchmark Environment**: All measurements performed on Ubuntu 24.04 with Clang 18. Performance may vary significantly on different systems, architectures, and configurations. Use these numbers for relative comparison only.
+> **Note on Performance Numbers**: These are reference measurements from a specific test environment. Your results may be significantly different depending on CPU, memory, storage, compiler version, and system load. Use these numbers for relative comparison only.
 
 Example compilation command:
 ```cpp
@@ -276,9 +278,9 @@ auto cmd = compiler + " -std=" + std + " -fPIC -Xclang -ast-dump=json " +
            " -o lib" + name + ".so > " + name + ".json";
 ```
 
-### 4. Clang Code Completion System (v2.0.0)
+### 4. Code Completion System (v1.5-alpha)
 
-The current version implements **full Clang-based semantic completion** with native libclang integration:
+The current version implements **simple readline-based completion** with basic symbol and keyword matching:
 
 #### Current Completion (Working):
 ```cpp
@@ -287,60 +289,59 @@ namespace completion {
         // Basic symbol and keyword completion
         std::vector<std::string> getBasicCompletions(const std::string& text);
         void setupReadlineCompletion();
-        
+
         // Simple completion matching
         bool matchesPrefix(const std::string& symbol, const std::string& prefix);
     };
 }
 ```
 
-**Current Features (v2.0.0):**
-- ✅ **Semantic completion**: Full Clang-based code completion with type awareness
-- ✅ **Context-aware suggestions**: Completions based on current scope and AST analysis
-- ✅ **Symbol resolution**: Real-time symbol lookup and type inference
-- ✅ **Performance optimized**: Sub-100ms completion response for most contexts
-- ✅ **Readline integration**: Standard readline completion interface
+**Current Features (v1.5-alpha):**
+- **Basic completion**: Keyword and simple symbol completion via readline
+- **Symbol matching**: Prefix-based matching of declared symbols
+- **Readline integration**: Standard readline completion interface
+- **Fast response**: Minimal latency for basic completions
 
-#### 🚧 **Enhanced LSP Features (v2.1+ Target):**
+#### Future Completion Features (v2.0+ Target):
 
-Advanced clangd JSON-RPC integration is planned for future releases:
+Semantic completion with Clang/libclang integration is planned for future releases:
 
 ```cpp
-// TODO: Complete implementation for v2.0
+// Planned for v2.0+
 namespace completion {
-    class LspClangdService {
-        // LSP client with full JSON-RPC protocol support
-        bool start(const std::string& clangdPath);          // TODO: Implement
-        std::vector<CompletionItem> getCompletions(...);    // TODO: Implement
-        
-        // Event loop with timeout handling
-        bool pumpUntil(std::function<bool(const json&)>...; // TODO: Implement
+    class ClangCompletion {
+        // Clang-based semantic completion
+        bool initialize(const std::string& clangPath);      // Planned
+        std::vector<CompletionItem> getCompletions(...);    // Planned
+
+        // Context-aware features
+        std::string getDocumentation(const std::string& symbol);  // Planned
+        std::vector<Diagnostic> getDiagnostics(...);              // Planned
     };
 
-    class LspReadlineIntegration {
-        // RAII scope management for REPL integration
-        struct Scope {
-            void updateReplContext(const ReplState& repl);   // TODO: Implement
-            std::vector<CompletionItem> complete(...);       // TODO: Implement
-        };
+    class LspClangdService {
+        // Optional: LSP/clangd integration for advanced features
+        bool start(const std::string& clangdPath);          // Planned
+        bool pumpUntil(std::function<bool(const json&)>...);// Planned
     };
 }
 ```
 
-**Planned Features (v2.0):**
-- 🚧 **Context-aware completion**: Semantic understanding of current scope
-- 🚧 **Error diagnostics**: Real-time syntax and semantic error highlighting  
-- 🚧 **Intelligent suggestions**: Function signatures, member completion
-- 🚧 **Performance target**: Sub-100ms completion latency with background processing
+**Planned Features (v2.0+):**
+- [Planned] **Semantic completion**: Full Clang-based code completion with type awareness
+- [Planned] **Context-aware suggestions**: Semantic understanding of current scope
+- [Planned] **Error diagnostics**: Real-time syntax and semantic error highlighting
+- [Planned] **Intelligent suggestions**: Function signatures, member completion
+- [Planned] **Performance target**: Sub-100ms completion latency
 
-**Architecture Benefits (Ready for v2.0):**
-- ✅ **Stable Interface**: JSON-RPC LSP protocol (version-independent)
-- ✅ **Isolation**: Separate clangd process prevents REPL crashes
-- ✅ **Scalability**: Foundation for large codebase handling
+**Architecture Benefits:**
+- [Future] **Stable Interface**: Can support both libclang and LSP/clangd backends
+- [Future] **Isolation**: Separate process option prevents REPL crashes
+- [Future] **Scalability**: Foundation for large codebase handling
 
 ### 5. Abstract Syntax Tree (AST) Analysis and Export
 
-A sophisticated AST analysis system extracts symbol information while addressing the challenges of global scope execution:
+The AST analysis system extracts symbol information and handles global scope execution:
 
 - **Clang AST Export**: Utilizes Clang's `-Xclang -ast-dump=json` functionality to export complete AST information in JSON format
 - **Symbol Extraction**: Parses AST to identify function declarations (`FunctionDecl`), variable declarations (`VarDecl`), and C++ method declarations (`CXXMethodDecl`)
@@ -360,16 +361,16 @@ Unlike conventional REPL behavior that permits code and declarations in any sequ
 
 ### 6. Dynamic Linking and Symbol Resolution
 
-The system implements advanced dynamic linking techniques using POSIX APIs:
+The system uses dynamic linking with POSIX APIs:
 
 - **Runtime Library Loading**: Uses `dlopen()` with `RTLD_NOW | RTLD_GLOBAL` flags for immediate symbol resolution and global symbol availability
 - **Symbol Address Calculation**: Implements memory mapping analysis through maps to calculate actual symbol addresses in virtual memory
 - **Offset-Based Resolution**: Calculates symbol offsets within shared libraries using `nm` command parsing
-- **First-Symbol Priority**: Leverages `dlsym`'s behavior of returning the first encountered symbol occurrence
+- **First-Symbol Priority**: Uses `dlsym`'s behavior of returning the first encountered symbol occurrence
 
 ### 7. Function Wrapper Generation and Dynamic Replacement
 
-A novel approach to handle forward declarations and enable real-time function replacement:
+Function wrappers handle forward declarations and enable real-time function replacement:
 
 #### Function Wrapper Architecture:
 ```cpp
@@ -391,7 +392,7 @@ void __attribute__((naked)) foo() {
 
 ### 8. Error Recovery and Debugging Integration
 
-The system provides comprehensive error handling and debugging capabilities:
+The system provides error handling and debugging capabilities:
 
 #### Exception Handling in REPL Loop:
 ```cpp
@@ -417,7 +418,7 @@ try {
 
 ### 9. Memory Management and Variable State Preservation
 
-Advanced memory management and variable tracking:
+Memory management and variable tracking:
 
 - **Session State Maintenance**: Maintains variable declarations during the current REPL session through decl_amalgama.hpp
 - **Type-Aware Printing**: Generates type-specific printing functions for variable inspection
@@ -425,9 +426,9 @@ Advanced memory management and variable tracking:
 - **#return Command**: Combines expression evaluation with automatic result printing
 - **Temporary State**: Variable state is not persisted between REPL sessions (future enhancement)
 
-### 10. Advanced REPL Commands and Features
+### 10. REPL Commands and Features
 
-The system provides several sophisticated commands:
+The system provides several commands:
 
 - **#eval**: Wraps expressions in functions for execution (not needed for declarations)
 - **#return**: Evaluates expressions and prints results automatically
@@ -474,7 +475,7 @@ Type name: int value: 120
 
 ### 11. Bootstrap Extension Mechanism
 
-Advanced extensibility through function pointer bootstrapping:
+Function pointer bootstrapping for extensibility:
 
 ```cpp
 extern int (*bootstrapProgram)(int argc, char **argv);
@@ -487,7 +488,7 @@ This mechanism enables users to:
 
 ### 12. Pre-built Library Integration (`#loadprebuilt`)
 
-The `#loadprebuilt` command implements sophisticated integration of external compiled libraries into the REPL environment:
+The `#loadprebuilt` command integrates external compiled libraries into the REPL environment:
 
 #### Symbol Extraction and Analysis
 ```cpp
@@ -646,9 +647,9 @@ The project demonstrates practical applications through a self-editing text edit
 4. **Complex Signal Interactions**: Advanced signal handling may interfere with user code signal usage
 5. **Session Persistence**: Variable state is lost when REPL session ends
 
-## Advanced Assembly and Linking Techniques
+## Assembly and Linking Techniques
 
-The project demonstrates several low-level systems programming concepts:
+The project uses several low-level systems programming concepts:
 
 - **ELF Binary Analysis**: Uses tools like `nm` to extract symbol tables from compiled objects
 - **Relocatable Code Generation**: Ensures all generated code can be loaded at runtime-determined addresses
@@ -657,33 +658,37 @@ The project demonstrates several low-level systems programming concepts:
 - **Register State Preservation**: Careful assembly programming to maintain calling conventions
 - **ABI Interception**: Hooks into C++ runtime for backtrace embedding
 
-### How We Measure
+### How We Measure (Example Only)
 
-The numbers above come from executions like:
+The reference measurements were obtained from test runs similar to:
 
 ```bash
-# Cold start minimum (initialization/JIT):
+# Example cold start measurement (clang-repl):
 echo -e '#include <iostream>\n' | time clang-repl-18
-# Typical: ~0.21–0.22 s elapsed for this minimal snippet,
-# of which ~100–120 ms corresponds to initialization; the rest is I/O and finalization.
+# Observed on test system: ~0.21-0.22s elapsed for this minimal snippet,
+# of which ~100-120ms corresponds to initialization; the rest is I/O and finalization.
+# YOUR RESULTS WILL VARY - this is just an example measurement.
 ```
 
 ```bash
+# Example comparison (your numbers will be different):
 echo -e '#include <iostream>\nstd::cout << "Hello world!\\n";\nint a = 10;\na+=1;\n++a;\na++;\n' | time --verbose ./cpprepl
 echo -e '#include <iostream>\nstd::cout << "Hello world!\\n";\nint a = 10;\na+=1;\n++a;\na++;\n' | time --verbose clang-repl-18
 ```
 
-> **Note**: `cpprepl` recompiles/analyzes and loads each block, and the first interaction may regenerate the PCH. This explains why the "time per evaluation" (~90–96 ms compilation + ~1μs–48ms loading) appears reasonable, but the total script time via pipe is significantly higher than `clang-repl-18`. **Load times are highly variable**: cached executions complete in microseconds, while fresh library loads with complex symbol tables can take up to 48ms.
+> **Note**: `cpprepl` recompiles/analyzes and loads each block, and the first interaction may regenerate the PCH. The reference "time per evaluation" (~90-96ms compilation + ~1μs-48ms loading) is from a specific test environment, but the total script time via pipe being higher than `clang-repl-18` reflects the architectural difference. **Load times are highly variable**: cached executions complete in microseconds, while fresh library loads with complex symbol tables can take up to 48ms.
 >
-> For `clang-repl-18`, the difference between **cold start (~100–120 ms)** and **end-to-end time (~0.21–0.22 s)** is mostly I/O (stdin/stdout) and process teardown.
+> For `clang-repl-18`, the difference between **cold start (~100-120ms)** and **end-to-end time (~0.21-0.22s)** on the test system is mostly I/O (stdin/stdout) and process teardown.
 
-> **⚠️ System Dependencies**: These benchmarks reflect specific hardware and software configurations. Actual performance will vary based on:
+> **Important - Performance Will Vary**: These benchmarks are from a specific test environment. Your actual performance depends on:
 > - **CPU Architecture**: x86_64, ARM64, core count, and clock speeds
 > - **Memory**: Available RAM, swap configuration, and memory bandwidth
 > - **Storage**: SSD vs HDD, filesystem type, and I/O load
 > - **Compiler Versions**: Different Clang/GCC versions may show significant variance
 > - **System Load**: Background processes and resource contention
 > - **OS Configuration**: Kernel settings, security features, and driver versions
+>
+> **Always measure on your own system** - these numbers are examples, not guarantees.
 
 ## Building and Usage
 
@@ -834,10 +839,10 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 
 ## Performance Characteristics (v1.5-alpha)
 
-> **⚠️ Performance Variability**: All performance metrics are highly system-dependent. Results will vary significantly based on hardware configuration, compiler versions, system load, and environmental factors. Use these measurements as relative performance indicators rather than absolute benchmarks.
+> **Performance Variability**: All performance metrics are **reference values from test measurements** and are highly system-dependent. Your actual performance will likely be different - it may be faster or slower depending on your hardware, compiler version, system load, and configuration. These numbers are provided for understanding relative performance characteristics, not as performance guarantees. Benchmark on your own system for accurate numbers.
 
-### Compilation Performance ✅ **VERIFIED FUNCTIONALITY**
-- **Single File Compilation**: **90-96ms average** (measured in Ubuntu 24.04 environment)
+### Compilation Performance (VERIFIED FUNCTIONALITY)
+- **Single File Compilation**: ~90-96ms average (reference value from test system)
 - **Dual-Level Parallelism**:
   - **Inter-file**: Multiple source files compiled simultaneously  
   - **Intra-file**: AST analysis + object compilation run in parallel using `std::async`
@@ -852,16 +857,16 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
   - **Performance boost**: Significantly faster linking compared to default system linker
 - **Memory Usage**: ~150MB peak during complex compilations
 
-### Completion System Performance ✅ **CLANG INTEGRATION**
-- **Current (v2.0)**: Full Clang-based code completion with semantic analysis
-- **Response Time**: Sub-100ms completion latency for most contexts
-- **Features**: Context-aware suggestions, symbol completion, type inference
-- **Architecture**: Native libclang integration with readline interface
+### Completion System Performance (BASIC COMPLETION)
+- **Current (v1.5-alpha)**: Simple readline-based completion with keyword/symbol matching
+- **Response Time**: Minimal latency for basic completions
+- **Features**: Keyword completion, simple symbol matching
+- **Architecture**: Native readline integration with basic symbol lookup
 
-### Runtime Performance ✅ **NATIVE EXECUTION**
+### Runtime Performance (NATIVE EXECUTION)
 - **Native Speed**: Compiled code runs at full native performance (no interpretation)
 - **Symbol Resolution**: ~1-10μs per function call through optimized assembly trampolines
-- **Library Loading**: **Highly variable ~1μs–48ms** depending on library size, symbol count, and system state
+- **Library Loading**: ~1μs-48ms depending on library size, symbol count, and system state (highly variable)
 - **Startup Time**: ~0.8s (fast initialization)
 - **Memory Layout**: Standard process memory model with shared library segments
 - **Peak Memory**: ~150MB during complex compilations with includes
@@ -882,7 +887,7 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 
 ### Research Applications
 - **Dynamic Compilation Research**: Foundation for advanced JIT techniques
-- **Error Handling Studies**: Novel approach to signal-to-exception translation
+- **Error Handling Studies**: Signal-to-exception translation approach
 - **Memory Management Analysis**: Real-time memory layout exploration
 
 ## Future Work and Extensions
@@ -941,7 +946,7 @@ This work builds upon concepts from:
 
 ## Conclusion
 
-This implementation represents a groundbreaking approach to C++ REPL design that combines native code execution with sophisticated error handling and debugging capabilities. The system demonstrates advanced knowledge of:
+This C++ REPL implementation combines native code execution with error handling and debugging capabilities. The system uses:
 
 - Operating system signal handling and exception mechanisms
 - Assembly-level programming and register management
@@ -952,10 +957,10 @@ This implementation represents a groundbreaking approach to C++ REPL design that
 - C++ runtime ABI manipulation
 - Hardware exception analysis and recovery
 
-The innovative signal-to-exception translation system, combined with embedded backtrace generation, represents a significant advancement in interactive development tool safety and debugging capabilities. The architecture provides a foundation for understanding how robust dynamic compilation systems can be built from first principles, offering insights into the trade-offs between compilation time, execution performance, and error recovery in interactive development environments.
+The signal-to-exception translation system with embedded backtrace generation improves interactive development tool safety and debugging. The architecture shows how dynamic compilation systems can be built, illustrating the trade-offs between compilation time, execution performance, and error recovery.
 
-The project's practical applications, demonstrated through the self-editing text editor with comprehensive crash recovery, showcase the potential for creating development environments where code modification and execution happen seamlessly in real-time while maintaining system stability even in the presence of user code errors. This represents a significant advancement in interactive C++ development tools, providing both the performance benefits of native compilation and the safety features typically associated with managed environments.
+The self-editing text editor with crash recovery demonstrates the potential for development environments where code modification and execution happen in real-time while maintaining system stability despite user code errors. This provides both the performance of native compilation and safety features similar to managed environments.
 
-> **🎯 Key Trade-offs Summary**: This REPL prioritizes **native execution performance** and **comprehensive debugging** over **fast iteration**. While evaluation takes longer than JIT-based solutions (~90-144ms vs ~100-120ms), users benefit from full-speed native code execution, complete debugging capabilities, and crash recovery. **Load time variability** (microseconds for cached vs ~48ms for complex fresh loads) reflects the dynamic library approach. The architecture choice reflects the principle that compilation overhead is acceptable when balanced against the advantages of native performance and debugging fidelity.
+> **Key Trade-offs Summary**: This REPL prioritizes **native execution performance** and **debugging capabilities** over **fast iteration**. While evaluation takes longer than JIT-based solutions (reference measurements: ~90-96ms compilation + ~1μs-48ms loading vs ~100-120ms JIT cold start), users benefit from full-speed native code execution, debugging features, and crash recovery. **Load time variability** (microseconds for cached vs ~48ms for complex fresh loads) reflects the dynamic library approach. The compilation overhead is acceptable when balanced against the advantages of native performance and debugging fidelity.
 >
-> **📈 Performance Context**: The performance characteristics documented here represent measurements on specific hardware and software configurations. Real-world performance will vary based on system specifications, workload characteristics, and environmental factors. Users should benchmark on their target systems for production planning.
+> **Performance Context**: All performance numbers in this document are **reference measurements from test environments** and will vary on your system. Real-world performance depends on your specific hardware, compiler version, system load, and configuration. The numbers are provided to show relative performance characteristics and architectural trade-offs, not as benchmarks or performance guarantees. Always measure on your own system.

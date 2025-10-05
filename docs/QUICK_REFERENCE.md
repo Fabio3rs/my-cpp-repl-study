@@ -21,14 +21,14 @@ Options:
 |---------|---------|---------|
 | `#includedir <path>` | Add include directory | `#includedir /usr/local/include` |
 | `#include <header>` | Include header (compiler validated) | `#include <vector>` |
-| `#include "file"` | Include local file ⚠️ See safety note | `#include "header.h"` |
+| `#include "file"` | Include local file - See safety note | `#include "header.h"` |
 | `#lib <name>` | Link with library | `#lib pthread` |
 | `#compilerdefine <def>` | Add preprocessor definition | `#compilerdefine DEBUG=1` |
 | `#loadprebuilt <path>` | Load prebuilt library | `#loadprebuilt ./mylib.so` |
 | `#eval <file>` | Execute C++ file (safe for globals) | `#eval mycode.cpp` |
 | `#return <expr>` | Evaluate and print expression | `#return x + y` |
 
-**⚠️ SAFETY WARNING:** For .cpp files with global variables, use `#eval` instead of `#include` to prevent double-free crashes!
+**SAFETY WARNING:** For .cpp files with global variables, use `#eval` instead of `#include` to prevent double-free crashes!
 
 ### Advanced Commands
 | Command | Purpose | Example |
@@ -72,10 +72,10 @@ cmake .. && make -j$(nproc)
 ### Basic Usage
 ```cpp
 >>> int x = 42;
-✓ Compiled successfully (93ms)
+Compiled successfully (93ms)
 
 >>> std::vector<int> v = {1, 2, 3};
-✓ Compiled successfully (89ms)
+Compiled successfully (89ms)
 
 >>> #return v.size()
 3
@@ -87,18 +87,18 @@ cmake .. && make -j$(nproc)
 >>> #lib blas
 >>> #include <Eigen/Dense>
 >>> Eigen::MatrixXd m(2,2);
-✓ Compiled successfully (234ms)
+Compiled successfully (234ms)
 ```
 
 ### Error Recovery (with -s flag)
 ```cpp
 >>> int* ptr = nullptr;
 >>> *ptr = 42;  // Crash
-⚠️ SEGV at: 0x0
-🛡️ Recovered - continue coding
+WARNING: SEGV at: 0x0
+Recovered - continue coding
 
 >>> int safe_value = 42;  // Works normally
-✓ Compiled successfully (45ms)
+Compiled successfully (45ms)
 ```
 
 ## Performance Tips
