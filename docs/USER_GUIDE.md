@@ -1,8 +1,7 @@
-# C++ REPL v1.5-alpha - User Guide
 
-[![C++](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![Clang](https://img.shields.io/badge/Clang-Required-orange.svg)](https://clang.llvm.org/) [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#prerequisites) [![Version](https://img.shields.io/badge/Version-1.5--alpha-yellow.svg)](.) 
+# User guide
 
-**C++ REPL v1.5-alpha** is an interactive C++ development environment that compiles your code to native machine code and executes it in real-time. This alpha release provides stable core functionality with **simple completion**, **crash-safe execution**, and **parallel compilation**.
+This document is the user guide for the C++ REPL v1.5-alpha. The README contains a short project summary; this guide provides step-by-step instructions, usage examples and troubleshooting tips.
 
 ## Current Features (v1.5-alpha)
 
@@ -14,11 +13,11 @@
 - **Include support** - `#include` directive functionality
 - **Plugin system** - Load pre-built libraries with `#loadprebuilt`
 
-## Coming in v2.0
+## Planned for v2.0 (high level)
 
-- [Planned] **LSP completion** - clangd integration for semantic completion
-- [Planned] **Enhanced error diagnostics** - Rich error information with code context
-- [Planned] **Multi-file project support** - Complex project handling
+- LSP-based semantic completion (clangd/libclang integration)
+- Improved error diagnostics with richer context
+- Better multi-file project support
 
 ## Table of Contents
 
@@ -30,50 +29,39 @@
 - [Performance](#performance)
 - [Troubleshooting](#troubleshooting)
 
-## Quick Start
+git clone --recursive https://github.com/Fabio3rs/my-cpp-repl-study.git
+## Quick start
 
 ```bash
 # Clone and build
 git clone --recursive https://github.com/Fabio3rs/my-cpp-repl-study.git
 cd my-cpp-repl-study
 mkdir build && cd build
-cmake .. && make -j$(nproc)
+cmake ..
+make -j$(nproc)   # or: ninja -j$(nproc)
 
-# Start interactive REPL
+# Start the REPL
 ./cpprepl
 
-# Try some C++ code
+# Try some simple C++ code interactively:
 int x = 42;
 #return x * 2
 ```
 
-## Installation
+## Installation (summary)
 
-### Prerequisites
+Prerequisites (summary): Linux (POSIX), CMake 3.10+, Clang/LLVM (10+ recommended), `pkg-config`, and development headers for `readline` and `tbb`.
 
-**Required System Dependencies:**
-- **Linux** (POSIX-compliant system required)
-- **Clang/LLVM** 10+ (for compilation and semantic completion)
-- **CMake** 3.10+
-- **GNU Make** or **Ninja**
-- **pkg-config**
-- **Development libraries:**
-  - `libreadline-dev` (command line editing)
-  - `libtbb-dev` (Intel Threading Building Blocks)
-  - `libnotify-dev` (desktop notifications)
+On Ubuntu/Debian you can install common dependencies with:
 
-**Ubuntu/Debian:**
 ```bash
 sudo apt update
 sudo apt install build-essential clang cmake pkg-config \
-    libreadline-dev libtbb-dev libnotify-dev \
-    libgtest-dev ninja-build
+  libreadline-dev libtbb-dev libnotify-dev libgtest-dev \
+  ninja-build
 ```
 
-**Optional Dependencies:**
-- **nlohmann-json** (LSP completion demo)
-- **Doxygen** (API documentation generation)
-- **GoogleTest** (testing framework)
+See `docs/INSTALLATION.md` for a more detailed, step-by-step installation guide and optional dependency list.
 
 ### Build Process
 

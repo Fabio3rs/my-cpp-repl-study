@@ -61,32 +61,26 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 - **Test coverage** - Test suites covering core functionality (118 tests)
 - **Verbose logging** - Multiple verbosity levels for debugging
 
-## Future Enhancements (v2.0+ Roadmap)
 
-### Completion Features (Planned)
-- [Planned] **Semantic code completion** - Clang-based completion with libclang integration
-- [Planned] **LSP integration** - JSON-RPC protocol support with clangd
-- [Planned] **Real-time diagnostics** - Syntax and semantic error highlighting
-- [Planned] **Symbol documentation** - Hover information and signature help
+## Roadmap & Future Plans (v2.0+)
 
-### Platform & Performance
-- [Future] **Cross-platform support** - Windows and macOS compatibility
-- [Future] **Performance optimization** - Enhanced caching for large codebases
-- [Future] **Memory optimization** - Improved handling of long REPL sessions
+Planned features for future releases:
 
-### Development Experience
-- [Future] **IDE integration** - VS Code and other editor plugins
-- [Future] **Session persistence** - Save/restore REPL state between sessions
-- [Future] **Remote execution** - Network-based REPL server capabilities
+- **Semantic code completion**: Clang/libclang-based completion
+- **LSP integration**: JSON-RPC protocol support with clangd
+- **Real-time diagnostics**: Syntax and semantic error highlighting
+- **Symbol documentation**: Hover info and signature help
+- **Cross-platform support**: Windows and macOS compatibility
+- **Performance optimization**: Enhanced caching for large codebases
+- **Memory optimization**: Improved handling of long REPL sessions
+- **IDE integration**: VS Code and other editor plugins
+- **Session persistence**: Save/restore REPL state between sessions
+- **Remote execution**: Network-based REPL server capabilities
+- **Multi-file projects**: Support for larger project structures
+- **Debugging integration**: GDB integration for interactive debugging
+- **Performance profiling**: Built-in profiling tools
+- **Package management**: Integration with C++ package managers
 
-## Future Plans (v2.0+)
-
-- **LSP Integration** - clangd server integration
-- **Multi-file Projects** - Support for larger project structures
-- **Debugging Integration** - GDB integration for interactive debugging
-- **Cross-platform Support** - Windows and macOS compatibility
-- **Performance Profiling** - Built-in profiling tools
-- **Package Management** - Integration with C++ package managers
 
 ## Table of Contents
 
@@ -99,7 +93,6 @@ This project presents a **C++ REPL (Read-Eval-Print Loop) v1.5-alpha** - an inte
 - [Technical Innovations vs. clang-repl](#technical-innovations-vs-clang-repl)
 - [Safety and Security Considerations](#safety-and-security-considerations)
 - [Assembly and Linking Techniques](#assembly-and-linking-techniques)
-- [Future Work and Extensions](#future-work-and-extensions)
 - [Contributing](#contributing)
 - [License and Acknowledgments](#license-and-acknowledgments)
 
@@ -890,24 +883,21 @@ export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 - **Error Handling Studies**: Signal-to-exception translation approach
 - **Memory Management Analysis**: Real-time memory layout exploration
 
-## Future Work and Extensions
 
-### Potential Improvements
-1. **Memory Management**: Implement library unloading to reduce memory consumption
-2. **Session Persistence**: Add ability to save and restore variable state between REPL sessions
-3. **Symbol Versioning**: Add support for function versioning and rollback
-4. **Distributed Execution**: Extend to support remote compilation and execution
-5. **IDE Integration**: Develop plugins for popular development environments
-6. **Language Extensions**: Support for experimental C++ features
+## Contributing & Future Work
 
-### Research Directions
-1. **Incremental Linking**: Optimize linking performance for large codebases
-2. **Smart Caching**: Implement intelligent compilation result caching beyond simple string matching
-3. **Cross-Platform Support**: Extend to Windows and macOS
-4. **Security Sandboxing**: Add isolation mechanisms for untrusted code
-5. **Performance Profiling**: Integrate real-time performance analysis
+We welcome contributions in code, documentation, and testing. See the roadmap above for planned improvements. Areas for contribution include:
 
-## Contributing
+- Signal handling improvements
+- Cross-platform compatibility
+- Performance optimizations
+- Additional REPL commands
+- Usage examples and tutorials
+- Technical deep-dives
+- Performance benchmarks
+- Edge case identification
+- Platform-specific testing
+- Memory leak detection
 
 This project welcomes contributions in several areas:
 
@@ -929,13 +919,14 @@ This project welcomes contributions in several areas:
 - Performance regression testing
 - Memory leak detection
 
+
 ## License and Acknowledgments
 
 ### Third-Party Components
-- **segvcatch**: Signal handling library (LGPL)
-- **simdjson**: High-performance JSON parsing
-- **readline**: Command-line interface
-- **Clang/LLVM**: Compiler infrastructure
+- segvcatch: Signal handling library (LGPL)
+- simdjson: High-performance JSON parsing
+- readline: Command-line interface
+- Clang/LLVM: Compiler infrastructure
 
 ### Academic References
 This work builds upon concepts from:

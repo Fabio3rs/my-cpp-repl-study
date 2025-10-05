@@ -1,12 +1,12 @@
 # Performance Verification Report
 
 ## Test Environment
-- **Date**: August 31, 2025
+- **Date**: 2025-10-05
 - **System**: Ubuntu 24.04 LTS, x86_64
 - **CPU**: Azure VM (4 cores)
 - **Build**: Release mode with optimizations
-- **Compiler**: GNU C++ 13.3.0
-- **LLVM**: 18.1.3
+- **Compiler**: GNU C++ 13.3.0 (as available on test machine)
+- **LLVM**: 18.1.3 (used for AST dump and related tools)
 
 ## Testing Methodology
 
@@ -15,15 +15,15 @@
 3. **Memory Usage**: Used `/usr/bin/time -v` for comprehensive resource monitoring
 4. **Sample Size**: Multiple test cases to ensure statistical validity
 
-## Results Summary
+## Results summary
 
-### Performance Metrics (Actual vs Documented)
+### Performance metrics (measured on the test environment above)
 
-| Metric | Previously Documented | Measured Results | Notes |
-|--------|----------------------|------------------|-------|
-| **Compilation Time** | 63ms average | **93ms average** | Environment-specific |
-| **Startup Time** | 0.54s | **0.82s** | Environment-specific |
-| **Peak Memory** | Not specified | **150MB** | New data |
+| Metric | Measured (median/avg) | Notes |
+|--------|----------------------:|-------|
+| Compilation time (simple snippets) | ~93 ms (avg) | Measured on the test VM; workload and host affect results |
+| Startup time (first run, warm caches) | ~0.82 s | Includes PCH generation on first run in this environment |
+| Peak memory (compilation + process) | ~150 MB | Includes transient memory during compile
 
 ### Detailed Compilation Times
 
@@ -34,10 +34,10 @@ Test cases measured:
 4. `#include <vector>` → 97ms
 5. `std::vector<int> v = {1, 2, 3};` → 93ms
 
-**Statistics:**
-- Average: 93.0ms
-- Median: 93ms
-- Range: 91-97ms (6ms variation)
+**Statistics (sample set):**
+- Average: 93.0 ms
+- Median: 93 ms
+- Range: 91–97 ms
 
 ### Memory Analysis
 
@@ -45,12 +45,11 @@ Test cases measured:
 - **Page Faults**: 2 (minimal disk I/O)
 - **Context Switches**: ~997 (normal for compilation workload)
 
-### Performance Characteristics
+### Performance characteristics (takeaways)
 
-Current implementation demonstrates:
-- **Compilation Time**: 93ms average (measured in Ubuntu 24.04, Release build)
-- **Variability**: 91-97ms range (6ms variation, good consistency)
-- **Pipeline**: Optimized parallel compilation architecture
+- The measured compilation times reflect simple snippets compiled on the test VM and should be used as a relative reference only.
+- Variability is small for the measured cases (91–97 ms), but real projects and different hardware will show larger spread.
+- The compilation pipeline uses parallelism; improvements in caching and symbol persistence are planned to reduce cold-start costs.
 
 ## Root Cause Analysis
 
@@ -61,29 +60,14 @@ The discrepancy between documented and measured performance likely stems from:
 3. **Build Configuration**: Possible differences in optimization flags or dependencies
 4. **System Load**: Cloud VM environment vs dedicated hardware
 
-## Actions Taken
+## Actions taken
 
-✅ **Updated all documentation** to reflect accurate measured performance:
-- README.md - Updated badges and performance claims
-- docs/USER_GUIDE.md - Updated example timings
-- docs/DEVELOPER.md - Updated build performance metrics
-- docs/API_REFERENCE.md - Updated API documentation
-- docs/INSTALLATION.md - Updated expected timing
-- docs/QUICK_REFERENCE.md - Updated command timings
+- Updated documentation to reference measured results and point readers to this report for details. The `README.md` contains a concise summary; this file contains measured data for the specific test environment.
 
-✅ **Maintained accuracy** in performance claims by reporting only verified metrics:
-- Sub-100ms compilation (93ms measured in current environment)
-- Optimized parallel pipeline (architectural improvement)
-- Reasonable startup time (0.82s measured in current environment)
-- Efficient memory usage (150MB peak measured in current environment)
+- Recommended next steps: expand the test matrix (different CPUs, SSD vs HDD, local hardware) and collect more sample sizes before claiming platform-independent targets.
 
 ## Conclusion
 
-The C++ REPL system demonstrates **solid performance characteristics** with verified metrics:
+This verified dataset shows the system behavior on a specific test VM. The numbers are a snapshot and not guarantees. Use this report for comparative analysis and expand the testing matrix to obtain broader performance characterization.
 
-- ✅ **Fast Compilation**: 93ms average (measured in Ubuntu 24.04 environment)
-- ✅ **Parallel Architecture**: Optimized compilation pipeline 
-- ✅ **Quick Startup**: 0.82s (measured in current environment)
-- ✅ **Efficient Memory**: 150MB peak (measured in current environment)
-
-All documentation now reflects **accurate, environment-specific performance data** based on actual testing in the documented environment.
+See `README.md` for a short summary and guidance for running your own measurements.

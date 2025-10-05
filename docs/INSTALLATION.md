@@ -9,7 +9,7 @@
 ### Required Dependencies
 
 **Core Build Tools:**
-- **Clang/LLVM** 10+ (primary compiler)
+- **Clang/LLVM** 18+ (recommended; C++20 support and tested with Clang 18)
 - **CMake** 3.10+
 - **GNU Make** or **Ninja** build system
 - **pkg-config** for dependency management
@@ -60,15 +60,15 @@ For systems without package managers or newer dependency versions:
 
 **Clang/LLVM:**
 ```bash
-# Download and build LLVM/Clang 15+
-wget https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.0/llvm-project-15.0.0.src.tar.xz
-tar -xf llvm-project-15.0.0.src.tar.xz
-cd llvm-project-15.0.0.src
+# Download and build LLVM/Clang 18+ (example uses a published release)
+wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.0.0/llvm-project-18.0.0.src.tar.xz
+tar -xf llvm-project-18.0.0.src.tar.xz
+cd llvm-project-18.0.0.src
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DLLVM_ENABLE_PROJECTS="clang" \
-      -DCMAKE_INSTALL_PREFIX=/usr/local \
-      ../llvm
+  -DLLVM_ENABLE_PROJECTS="clang" \
+  -DCMAKE_INSTALL_PREFIX=/usr/local \
+  ../llvm
 ninja install
 ```
 
@@ -184,11 +184,13 @@ make -j$(nproc)
 
 ### Custom Clang Version
 
+If you have multiple Clang versions installed, prefer Clang 18 or newer. Example (adjust to your installed versions):
+
 ```bash
 # Use specific Clang version
-export CC=clang-15
-export CXX=clang++-15
-cmake .. -DCMAKE_CXX_COMPILER=clang++-15
+export CC=clang-18
+export CXX=clang++-18
+cmake .. -DCMAKE_CXX_COMPILER=clang++-18
 make -j$(nproc)
 ```
 
@@ -215,10 +217,10 @@ sudo apt install libtbb-dev
 **3. Clang Version Issues**
 ```bash
 # Error: "Clang version too old"
-# Solution:
-sudo apt install clang-15 libclang-15-dev
-export CXX=clang++-15
-cmake .. -DCMAKE_CXX_COMPILER=clang++-15
+# Solution: install Clang 18+ and point CMake to the newer compiler
+sudo apt install clang-18 libclang-18-dev
+export CXX=clang++-18
+cmake .. -DCMAKE_CXX_COMPILER=clang++-18
 ```
 
 **4. CMake Version Issues**

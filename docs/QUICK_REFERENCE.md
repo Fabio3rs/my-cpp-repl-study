@@ -1,6 +1,6 @@
 # C++ REPL - Quick Reference
 
-## Command Line Usage
+## Command line usage
 
 ```bash
 cpprepl [OPTIONS]

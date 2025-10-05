@@ -1,8 +1,7 @@
-# C++ REPL - Developer Documentation
 
-[![Architecture](https://img.shields.io/badge/Architecture-Modular-brightgreen.svg)]() [![Lines](https://img.shields.io/badge/Lines-7500%2B-informational.svg)]() [![Tests](https://img.shields.io/badge/Test%20Coverage-95%25%2B-success.svg)]()
+# Developer guide
 
-This document provides comprehensive technical documentation for developers working on the C++ REPL project. The project has evolved from a 2,119-line monolithic prototype into a sophisticated production system with modular architecture.
+This document contains technical information for developers working on the project. See `README.md` for a concise summary and `CODE_ANALYSIS_AND_REFACTORING.md` for detailed architectural notes.
 
 ## Table of Contents
 
@@ -18,13 +17,12 @@ This document provides comprehensive technical documentation for developers work
 
 The C++ REPL uses a **modular architecture** designed around **POSIX compliance** and **thread safety**. The system compiles user input to native machine code and executes it dynamically while providing sophisticated error recovery.
 
-### System Metrics (Current State)
+### System metrics (approximate)
 
-- **Total Lines:** ~7,500+ (production code + tests)
-- **Core Module:** `repl.cpp` - 1,504 lines (down from 2,119, -29% reduction)
-- **Modular Code:** 4,555 lines across focused components
-- **Test Coverage:** 1,000+ lines across 5 test suites (95%+ coverage)
-- **Build Time:** ~93ms average compilation (optimized with parallel pipeline)
+- Total lines (approx): ~7,500 (production + tests)
+- Core module: `repl.cpp` reduced in size compared to earlier prototype
+- Test suite: multiple unit and integration tests; coverage estimates are indicative and should be validated with the coverage tool if needed
+- Build times depend on environment; see `PERFORMANCE_VERIFICATION.md` for a sample dataset
 
 ### High-Level Architecture
 

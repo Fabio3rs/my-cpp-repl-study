@@ -37,244 +37,32 @@ The system has successfully evolved from a monolithic prototype to a modular, we
 | Component | Status | Description |
 |-----------|--------|-------------|
 | **Interactive REPL** | ✅ **Stable** | Line-by-line C++ execution with variable persistence |
-| **Dynamic Compilation** | ✅ **Optimized** | 80-95ms average, parallel AST+compile pipeline |
-| **Signal Handling** | ✅ **Robust** | `-s` flag: SIGSEGV, SIGFPE, SIGINT → C++ exceptions |
-| **Batch Processing** | ✅ **Complete** | `-r` flag: Execute C++ command files |
-| **Error Recovery** | ✅ **Graceful** | Continue after compilation/runtime errors |
-| **Variable Persistence** | ✅ **Working** | Variables maintain state across commands |
-| **Function Definitions** | ✅ **Working** | Define and call functions interactively |
-| **Library Linking** | ✅ **Working** | `#lib` command for system libraries |
-| **Include Support** | ✅ **Working** | `#include` directive (with known limitations) |
-| **Plugin System** | ✅ **Working** | `#loadprebuilt` command for pre-built libraries |
+# Improvement Checklist (v1.5 → v2.0)
 
-### **Development Tools (Working)**
+This checklist contains the actionable items and known issues carried forward from the v1.5 release. It is intentionally concise: the README contains the project summary and high-level goals; this file lists items contributors can pick up.
 
-| Component | Lines | Status | Description |
-|-----------|-------|--------|-------------|
-| **Simple Completion** | ~200 | ✅ **Working** | Readline-based keyword/symbol completion |
-| **AST Analysis** | ~300 | ✅ **Working** | Code structure introspection |
-| **Testing Framework** | ~2,143 | ✅ **Comprehensive** | 5 specialized test suites |
-| **Verbose Logging** | ~150 | ✅ **Working** | Multiple verbosity levels (-v, -vv, -vvv) |
-| **Symbol Resolution** | ~470 | ✅ **Optimized** | Trampoline-based lazy loading |
-| **Compiler Service** | ~917 | ✅ **Parallel** | Multi-threaded compilation pipeline |
+## Known issues (short)
 
-### **Test Results (Verified Functionality)**
-- ✅ **118/118 tests passing** (100% success rate)
-- ✅ **All core compilation tests** pass
-- ✅ **All signal handling tests** pass  
-- ✅ **All symbol resolution tests** pass
-- ⚠️ **1 failing test**: Variable redefinition in complex includes (known issue)
+- Variable redefinition and include handling: test failure on include-heavy code paths. Priority: high.
+- Memory growth during long REPL sessions: investigate and add targeted tests. Priority: medium.
 
-**Total v1.5-alpha**: ~7,500 lines of stable, tested code
+## Short-term tasks (v2.0 P1)
 
----
+- Integrate clangd/libclang for semantic completion and diagnostics (design available).
+- Harden the CMake build and add CI jobs for Linux targets.
+- Implement a simple persistent symbol cache to reduce cold-start cost.
+- Improve error diagnostics to include code context where feasible.
 
-## 🚧 **v2.0 TODO LIST - Advanced Features**
+## Medium-term tasks (v2.0 P2)
 
-### **🔧 FIXME Items (Critical for Stability)**
+- Add basic multi-file support and improve library linking behavior.
+- Provide initial debugging hooks (GDB/LLDB) for crash inspection.
+- Prepare design and CI for cross-platform builds (Windows/macOS) — planning only.
 
-#### **1. Known Issues to Fix** 🚨
-- [ ] **FIXME**: Variable redefinition handling in complex includes
-  - **Issue**: CodeWithIncludes test failing due to type conflicts
-  - **Impact**: Complex C++ projects with multiple includes  
-  - **Priority**: High - affects advanced usage scenarios
-- [ ] **FIXME**: Memory usage optimization for long REPL sessions
-  - **Issue**: Potential memory accumulation over extended use
-  - **Impact**: Long-running interactive sessions
-  - **Priority**: Medium - affects extended usage
+## Notes
 
-#### **2. Error Handling Improvements** 🔧
-- [ ] **TODO**: Enhanced compilation error diagnostics  
-  - **Current**: Basic error messages and recovery
-  - **Target**: Rich error information with code context
-- [ ] **TODO**: Better include path resolution
-  - **Current**: Basic include support with edge cases
-  - **Target**: Robust include path handling
-
-### **🚀 v2.0 Feature Development (Future Plans)**
-
-#### **1. Advanced LSP Integration** ⏱️ 8-12 hours
-- [ ] **Real Semantic Completion**: Replace mock with working clangd integration
-  - Architecture is ready, implementation needed
-  - Enable full context-aware completion
-  - Function signatures, member completion, error diagnostics
-  - **Current**: Mock system + architecture prepared
-  - **Target**: Professional-grade semantic completion
-
-#### **2. Documentation Suite** ⏱️ 6-8 hours  
-- [ ] **Complete User Guide**: Step-by-step usage documentation
-- [ ] **API Documentation**: Plugin development guide
-- [ ] **Installation Guide**: Multi-platform setup instructions
-- [ ] **Examples Collection**: Comprehensive usage examples
-  - **Current**: Basic documentation exists
-  - **Target**: Production-ready documentation
-
-#### **3. Build System Hardening** ⏱️ 4-6 hours
-- [ ] **Production CMake**: Robust dependency management
-- [ ] **CI/CD Pipeline**: Automated testing and releases  
-- [ ] **Package Creation**: Debian/Ubuntu package generation
-- [ ] **Multi-platform Support**: Windows/macOS compatibility planning
-  - **Current**: Basic Linux build system
-  - **Target**: Enterprise-grade build infrastructure
-
-#### **4. Performance Enhancements** ⏱️ 4-6 hours
-- [ ] **Symbol Cache Persistence**: Disk-based caching system
-- [ ] **Startup Optimization**: Reduce cold-start times
-- [ ] **Memory Pool Management**: Optimized memory allocation  
-- [ ] **Profiling Integration**: Built-in performance analysis
-  - **Current**: Good performance (80-95ms compilation)
-  - **Target**: Sub-50ms compilation with caching
-
-#### **5. Advanced Features** ⏱️ 10-15 hours  
-- [ ] **Multi-file Project Support**: Complex project handling
-- [ ] **Debugging Integration**: GDB integration for step debugging
-- [ ] **Package Manager**: Integration with vcpkg/Conan
-- [ ] **Cross-compilation**: Support for different target architectures
-  - **Current**: Single-file focus
-  - **Target**: Enterprise project support
-
----
-
-## 🎯 **PHASE 3: Post-v2.0 Enhancement Pipeline**
-
-### **P1 - High Value Features (Post-Release)** ⚠️ ⏱️ 45-57 horas total
-
-#### **A. Advanced Code Intelligence** ⏱️ 20-25 horas
-- [ ] **Output Stream Management**: Integrate stdout/stderr capture with ncurses (prerequisite)
-- [ ] **Real-time Diagnostics**: Live error highlighting and suggestions (requires ncurses integration)
-- [ ] **Documentation Lookup**: Hover help and symbol documentation (requires ncurses integration)
-- [ ] **Code Navigation**: Go-to-definition, find references
-- [ ] **Smart Refactoring**: Automated code transformations
-
-#### **B. Session Management** ⏱️ 12-15 horas
-- [ ] **Persistent Sessions**: Save/restore complete REPL state
-- [ ] **Advanced History**: Searchable command history with context
-- [ ] **Workspace Support**: Multi-project session management
-- [ ] **Export Capabilities**: Generate standalone C++ code
-
-#### **C. Advanced Execution Features** ⏱️ 18-22 horas
-- [ ] **Debugging Integration**: GDB/LLDB integration for step-through debugging
-- [ ] **Performance Profiling**: Built-in profiling and analysis tools
-- [ ] **Memory Analysis**: Leak detection and memory monitoring
-- [ ] **Concurrent Execution**: Multi-threading and parallel processing support
-
-### **P2 - Quality of Life Improvements** 💡 ⏱️ 50-60 horas total
-
-#### **D. User Experience Enhancements** ⏱️ 10-12 horas
-- [ ] **Syntax Highlighting**: Real-time C++ syntax highlighting
-- [ ] **Visual Improvements**: Bracket matching, indentation guides
-- [ ] **Code Formatting**: Auto-format and style enforcement
-- [ ] **Theming Support**: Customizable color schemes and UI themes
-
-#### **E. Plugin Ecosystem Expansion** ⏱️ 15-18 horas
-- [ ] **Enhanced Plugin API**: More extensible command and feature system
-- [ ] **Standard Plugin Library**: Math, graphics, networking, database plugins
-- [ ] **Plugin Manager**: Install/remove plugins from within REPL
-- [ ] **Community Platform**: Plugin sharing and distribution system
-
-#### **F. Cross-Platform Support** ⏱️ 25-30 horas
-- [ ] **Windows Support**: MinGW/MSVC compatibility layer
-- [ ] **macOS Support**: Homebrew integration and native builds
-- [ ] **Container Support**: Official Docker/Podman images
-- [ ] **Web Interface**: Browser-based REPL for remote usage
-
----
-
-## 📋 **Implementation Timeline**
-
-### **Sprint 1: v2.0 Foundation** (2 semanas)
-```
-Semana 1: Core Features
-├── Libclang integration real implementation
-├── CMake hardening and build system
-├── Performance optimization (symbol cache)
-└── Basic documentation suite
-
-Semana 2: Polish & Release Prep
-├── Integration testing and validation
-├── Documentation completion
-├── Performance tuning and optimization
-└── Release preparation and final testing
-```
-
-### **Sprint 2-3: v2.0 Release** (2 semanas)
-```
-Semana 3: Release Candidate
-├── Community testing and feedback
-├── Bug fixes and stabilization
-├── Final documentation review
-└── Migration guide preparation
-
-Semana 4: v2.0 Launch
-├── Official release and announcement
-├── Community onboarding support
-├── Post-release monitoring and fixes
-└── v2.1 planning initiation
-```
-
----
-
-## 🎯 **Success Metrics and Targets**
-
-### **v2.0 Release Criteria**
-- 🎯 **libclang Integration**: 100% functional semantic completion
-- ✅ **Compilation Performance**: **93ms average** (target: < 100ms) - **7% under target**
-- ✅ **Parallel Processing**: Multi-core utilization with linear scaling
-- 🎯 **Startup Performance**: < 2s startup (current: 0.54s ✅)
-- 🎯 **Stability**: Zero regressions from current test suite
-- 🎯 **Documentation**: Complete user and developer guides
-- 🎯 **Build System**: 100% success rate on Ubuntu 20.04/22.04
-
-### **Quality Assurance**
-- 🎯 **Test Coverage**: Maintain > 90% line coverage
-- 🎯 **Memory Usage**: < 200MB with full symbol cache
-- 🎯 **Error Recovery**: 100% graceful handling of tested crash scenarios
-- 🎯 **POSIX Compliance**: Full compliance with Linux/POSIX requirements
-
----
-
-## 🚀 **Long-term Vision (Post-v2.0)**
-
-### **v2.x Series: Enhancement Releases** (3-6 meses)
-- Advanced debugging and profiling integration
-- Enhanced plugin ecosystem and community features
-- Performance optimizations and scalability improvements
-- Extended platform support and deployment options
-
-### **v3.0: Next Generation** (6-12 meses)
-- Web-based interface and remote execution
-- Collaborative coding and shared sessions
-- AI-powered code assistance and suggestions
-- Enterprise deployment and management tools
-
----
-
-## ✅ **Current Status: Ready for v2.0 Development**
-
-The system is **production-ready** with:
-- ✅ **7,481 lines** of tested, modular code
-- ✅ **Comprehensive testing** framework (2,143 lines)
-- ✅ **Modern C++20** architecture with RAII and thread safety
-- ✅ **Advanced features** (signals, batch mode, plugin system)
-- ✅ **POSIX-compliant** design with global state management
-
-**Next Milestone**: Complete libclang integration for professional semantic completion
-
-**Timeline**: v2.0 release target in **4 semanas** with focus on real completion and documentation
-
----
-
-## 📝 **Key Features Accomplished**
-
-### **Operating Modes**
-- ✅ **Interactive Mode (Default)**: Standard REPL behavior with live compilation
-- ✅ **Batch Run Mode (`-r` flag)**: Execute REPL commands from files for automation and testing
-- ✅ **Signal Handler Mode (`-s` flag)**: Installs robust signal handlers for graceful recovery from SIGSEGV, SIGFPE, and SIGINT
-
-### **Plugin System and Dynamic Loading**
-- ✅ **`#loadprebuilt <name>` Command**: Dynamic library loading with type-dependent behavior, integrated into the expanded command registry system supporting 7+ built-in commands with extensible architecture.
-
-### **Error Recovery and Diagnostics**
+- Keep README.md as the public summary. Use these files for technical detail and tracking.
+- Prefer small, testable PRs. Tag changes with `v2.0/p1` or `v2.0/p2` depending on scope.
 - ✅ **Advanced hardware exception handling** converts signals to C++ exceptions with:
   - **Assembly instruction analysis** on crashes using objdump integration
   - **Stack trace generation** with symbol resolution via dladdr
